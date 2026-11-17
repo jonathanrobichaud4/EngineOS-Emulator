@@ -337,6 +337,17 @@ cmd_start() {
     python3 "$HERE/viewer.py" --rootfs "$R" --port "$VIEW_PORT" --console "http://localhost:$CONSOLE_PORT/" $fwd \
         < /dev/null > "$STATE/viewer.log" 2>&1 &
     echo $! > "$STATE/viewer.pid"
+    # Don't report success unless the deck page is actually answering.
+    local i
+    for i in $(seq 1 30); do
+        curl -sf -o /dev/null -m 2 "http://127.0.0.1:$VIEW_PORT/" && break
+        if ! kill -0 "$(cat "$STATE/viewer.pid")" 2>/dev/null; then
+            echo "emu: the deck page server stopped; its log:" >&2; tail -n 20 "$STATE/viewer.log" >&2; cmd_stop >/dev/null 2>&1 || :
+            die "start failed"
+        fi
+        sleep 0.5
+    done
+    [ "$i" -lt 30 ] || { tail -n 20 "$STATE/viewer.log" >&2; die "the deck page isn't answering on port $VIEW_PORT"; }
     say "booting${PROFILE:+ profile $PROFILE} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
     [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
@@ -497,6 +508,17 @@ cmd_mod_install() {
 }
 
 cmd_tap() { printf 'down %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; sleep 0.2; printf 'up %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; }
+
+# The deck's processes run in the background after `start` returns. When start is run through
+# `wsl.exe -- bash -c ...` (the Windows app does this), WSL ends that whole session once the
+# command returns and takes the background processes with it. Running start in a session of its
+# own keeps them alive; -w still waits for start itself, so its output and exit code come back.
+case "${1:-}" in
+    start|reboot)
+        if [ -z "${EMU_OWN_SESSION:-}" ] && command -v setsid >/dev/null; then
+            EMU_OWN_SESSION=1 EMU_PROFILE=${PROFILE:-default} exec setsid -w "$HERE/emu.sh" "$@"
+        fi ;;
+esac
 
 case "${1:-}" in
     setup) shift; cmd_setup "$@" ;;
