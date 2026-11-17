@@ -79,11 +79,9 @@ deps() {
     if ! find_qemu; then
         say "installing the ARM emulator (qemu)"
         apt-get update -qq
-        if apt-cache show qemu-user-static 2>/dev/null | grep -q '^Filename:'; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static
-        else
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user
-        fi
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static 2>/dev/null ||
+            { say "qemu-user-static isn't available here; installing qemu-user instead";
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user; }
         find_qemu || die "couldn't find a statically linked qemu-arm after installing qemu ($(lsb_release -ds 2>/dev/null))"
     fi
     command -v debugfs >/dev/null || miss+=(e2fsprogs)

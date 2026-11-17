@@ -615,6 +615,7 @@ namespace SCLive4Emulator
             setupBar.Visible = setupGap.Visible = false;
             ActionsEnabled(true);
             Log("Emulator: " + wsl.EmuDir + " in WSL " + wsl.Distro);
+            if (Option("AutoUpdate", true)) { statusLabel.Text = "Checking for emulator updates..."; await UpdateEmulator(true); }
             await LoadProfiles();
             await RefreshAll();
             pollTimer.Start();
@@ -778,10 +779,10 @@ namespace SCLive4Emulator
                 if (MessageBox.Show(this, "Clear Engine's settings and library on this deck? EngineX and drives are kept.", "Reset", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK)
                     await Do("Resetting", "reset-data");
             });
-            m.Items.Add("Update the emulator (git pull)", null, async (s, e) =>
+            m.Items.Add("Update the emulator now", null, async (s, e) =>
             {
                 SetBusy(true, "Updating");
-                await wsl.Run("cd " + Wsl.Q(wsl.EmuDir) + " && git pull --ff-only", Log);
+                await UpdateEmulator(false);
                 SetBusy(false);
             });
             m.Items.Add("Open music folder", null, (s, e) => OpenUrl(Settings.MusicFolder));
@@ -790,9 +791,39 @@ namespace SCLive4Emulator
             auto.CheckedChanged += (s, e) => SetOption("AutoStart", auto.Checked);
             var open = new ToolStripMenuItem("Open the deck page after starting") { Checked = Option("OpenDeck", true), CheckOnClick = true };
             open.CheckedChanged += (s, e) => SetOption("OpenDeck", open.Checked);
+            var upd = new ToolStripMenuItem("Update the emulator when the app opens") { Checked = Option("AutoUpdate", true), CheckOnClick = true };
+            upd.CheckedChanged += (s, e) => SetOption("AutoUpdate", upd.Checked);
             m.Items.Add(auto);
+            m.Items.Add(upd);
             m.Items.Add(open);
             m.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        // Brings the emulator in WSL up to date with GitHub. The copy this app installed in /opt is the
+        // app's own, so local edits there are overwritten; your decks, settings and drives live in
+        // ignored folders (rootfs*, state*, drives.txt) and are never touched.
+        async Task UpdateEmulator(bool quiet)
+        {
+            string dir = Wsl.Q(wsl.EmuDir);
+            string script =
+                "cd " + dir + " || exit 1\n" +
+                "git rev-parse --git-dir >/dev/null 2>&1 || { echo 'not a git checkout, skipping update'; exit 0; }\n" +
+                "git config --global --add safe.directory " + dir + " 2>/dev/null\n" +
+                "before=$(git rev-parse --short HEAD)\n" +
+                "git fetch -q origin || { echo 'update check failed (no internet in WSL?)'; exit 1; }\n" +
+                "br=$(git rev-parse --abbrev-ref HEAD)\n" +
+                "if ! git merge -q --ff-only origin/$br 2>/dev/null; then\n" +
+                (wsl.EmuDir == "/opt/sclive4-emulator"
+                    ? "  echo 'local changes were in the way; resetting to the GitHub version'; git reset -q --hard origin/$br\n"
+                    : "  echo 'could not fast-forward (local changes?); run git pull in '" + dir + "' yourself'; exit 1\n") +
+                "fi\n" +
+                "after=$(git rev-parse --short HEAD)\n" +
+                "if [ \"$before\" = \"$after\" ]; then echo \"up to date ($after)\"; else echo \"updated $before -> $after\"; git log --oneline $before..$after | head -n 8; fi\n";
+            var lines = new List<string>();
+            int rc = await wsl.Run(script, l => lines.Add(l));
+            bool news = lines.Any(l => !l.StartsWith("up to date"));
+            if (!quiet || news || rc != 0) foreach (var l in lines) Log("Emulator update: " + l);
+            else if (lines.Count > 0) Log("Emulator " + lines[0]);
         }
 
         async Task ShowEngineLog()
