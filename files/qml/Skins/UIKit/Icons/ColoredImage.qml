@@ -31,7 +31,9 @@ ShaderEffect {
         anchors.fill: parent
         visible: !coloredImage.useOriginal
         property string url: coloredImage.source.toString()
-        onUrlChanged: if (url !== "") loadImage(url)
+        // An image another Canvas already loaded doesn't signal imageLoaded again, so paint
+        // whenever it's ready, however it got there.
+        onUrlChanged: { if (url !== "") loadImage(url); requestPaint() }
         onImageLoaded: requestPaint()
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
@@ -39,6 +41,10 @@ ShaderEffect {
         Connections {
             target: coloredImage
             function onColorChanged() { canvas.requestPaint() }
+        }
+        Connections {
+            target: image
+            function onStatusChanged() { if (image.status === Image.Ready) { canvas.loadImage(canvas.url); canvas.requestPaint() } }
         }
         onPaint: {
             var ctx = getContext("2d")
