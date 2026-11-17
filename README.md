@@ -23,7 +23,7 @@ Not emulated yet:
 
 ## Windows app (no command line)
 
-`windows/SCLive4Emulator.exe` is a small Windows program for all of this. Download it from the [latest release](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/latest) (or `windows/` in this repo) and run it; it needs nothing installed beyond Windows 10 or 11.
+`windows/SCLive4Emulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/sclive4-emulator/raw/main/windows/SCLive4Emulator.exe) and run it; it needs nothing installed beyond Windows 10 or 11.
 
 - It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/sclive4-emulator` in Ubuntu), and finds an older copy and moves your deck over.
 - **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\SC LIVE 4 Emulator`, which is plugged in as the EMULATOR drive.
