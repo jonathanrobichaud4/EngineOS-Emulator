@@ -59,6 +59,17 @@ Then open http://localhost:8090/ in your Windows browser. The first boot shows t
 - **Switches** (Thru A/THRU/B, Split Cue, Speaker, Mic/Aux): click a position. The FX channel selector turns with a click or the scroll wheel.
 - **Listen:** your browser only plays sound after you click something, so audio starts when you press Listen. The menu next to it switches between Main, Booth and Phones.
 
+### Stock Engine OS next to EngineX
+
+Each profile is a separate deck with its own file system, settings and library. Set one up from the firmware alone (no EngineX bundle) to get plain Engine OS:
+
+```sh
+sudo ./emu.sh --profile stock setup /mnt/c/Users/<you>/Downloads/<firmware>.img
+sudo ./emu.sh --profile stock start
+```
+
+Every command takes `--profile NAME` (`stop`, `status`, `drive`, `shell` and so on). Without it you get the default deck in `rootfs/`. One deck runs at a time. `start --stock` is different: it runs the EngineX deck with EngineX's hook switched off, but EngineX's files are still installed.
+
 ### Drives
 
 Click **Drives** on the page, or use the command line:

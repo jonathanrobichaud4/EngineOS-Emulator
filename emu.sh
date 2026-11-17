@@ -5,6 +5,7 @@
 # audio out. Meant for WSL2 (Ubuntu) or any x86_64 Linux.
 #
 #   sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]   build ./rootfs (once per firmware)
+#   sudo ./emu.sh --profile NAME <command>               use a separate deck (e.g. a stock Engine OS one)
 #   sudo ./emu.sh install ENGINEX_BUNDLE                 (re)install EngineX into the rootfs
 #   sudo ./emu.sh start [--stock]                        boot it, open http://localhost:8090
 #                                                        (sudo EMU_NET=0 ./emu.sh start: no network)
@@ -17,8 +18,15 @@ set -euo pipefail
 mountpoint -q /dev/pts 2>/dev/null || mount -t devpts devpts /dev/pts -o gid=5,mode=620,ptmxmode=000 2>/dev/null || :
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-R=${EMU_ROOTFS:-$HERE/rootfs}
-STATE=$HERE/state
+# Profiles: separate decks side by side, e.g. a stock Engine OS one next to the EngineX one.
+# `./emu.sh --profile stock setup FIRMWARE.img` (no bundle), then `./emu.sh --profile stock start`.
+# Each profile has its own rootfs-NAME/ and state-NAME/; the default profile uses rootfs/ and state/.
+PROFILE=${EMU_PROFILE:-}
+if [ "${1:-}" = --profile ]; then PROFILE=${2:-}; shift 2 || :; fi
+case "$PROFILE" in ""|default) PROFILE= ;; *[!A-Za-z0-9_-]*) echo "emu: profile names are letters, digits, - and _" >&2; exit 1 ;; esac
+SUFFIX=${PROFILE:+-$PROFILE}
+R=${EMU_ROOTFS:-$HERE/rootfs$SUFFIX}
+STATE=$HERE/state$SUFFIX
 VIEW_PORT=${VIEW_PORT:-8090}
 CONSOLE_PORT=${CONSOLE_PORT:-8080}
 QEMU=/usr/bin/qemu-arm-static
@@ -239,10 +247,10 @@ cmd_setup() {
     rm -f "$STATE/rootfs.img"
     [ -x "$R/usr/Engine/Engine" ] || die "no /usr/Engine/Engine in that firmware; is it an SC LIVE 4 image?"
     prepare_rootfs
-    say "stock Engine $(grep -o '[0-9][0-9.]*' "$R/etc/sc5000/version.txt" 2>/dev/null | head -1 || echo '') ready in $R"
+    say "Engine OS ready in $R"
     [ -z "${2:-}" ] || install_bundle "$2"
     mounts_down
-    say "done. Start it with: sudo ./emu.sh start"
+    say "done. Start it with: sudo ./emu.sh ${PROFILE:+--profile $PROFILE }start"
 }
 
 running() { [ -f "$STATE/emu.pid" ] && kill -0 "$(cat "$STATE/emu.pid")" 2>/dev/null; }
@@ -272,6 +280,11 @@ cmd_start() {
     need_root
     [ -x "$R/usr/Engine/Engine" ] || die "run: sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]"
     running && die "already running (sudo ./emu.sh stop first)"
+    local other
+    for other in "$HERE"/state*/emu.pid; do
+        [ -f "$other" ] && [ "$other" != "$STATE/emu.pid" ] && kill -0 "$(cat "$other")" 2>/dev/null &&
+            die "another profile is running ($(basename "$(dirname "$other")")); stop it first"
+    done
     local stock=0; [ "${1:-}" = --stock ] && stock=1
     deps; binfmt; prepare_rootfs >/dev/null; mounts_up
     mkdir -p "$STATE"; : > "$STATE/engine.log"
@@ -288,11 +301,11 @@ cmd_start() {
     python3 "$HERE/viewer.py" --rootfs "$R" --port "$VIEW_PORT" --console "http://localhost:$CONSOLE_PORT/" $fwd \
         < /dev/null > "$STATE/viewer.log" 2>&1 &
     echo $! > "$STATE/viewer.pid"
-    say "booting (first screen takes 1-2 minutes under emulation)"
+    say "booting${PROFILE:+ profile $PROFILE} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
-    [ $stock = 1 ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
+    [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
     [ "$EMU_NET" != 1 ] || say "network: USB Ethernet on eth0, deck $NET_DECK_IP via NAT (EMU_NET=0 to turn off)"
-    say "logs:    sudo ./emu.sh log      stop: sudo ./emu.sh stop"
+    say "logs:    sudo ./emu.sh ${PROFILE:+--profile $PROFILE }log      stop: sudo ./emu.sh ${PROFILE:+--profile $PROFILE }stop"
 }
 
 cmd_stop() {
@@ -402,5 +415,5 @@ case "${1:-}" in
         need_root; running && die "stop it first"
         rm -rf "$R/data/AppDataUser" "$R/data/StreamingAccounts.json"
         say "Engine settings and library reset (EngineX kept)" ;;
-    *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

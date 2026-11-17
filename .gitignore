@@ -1,5 +1,7 @@
 rootfs/
+rootfs-*/
 state/
+state-*/
 drives.txt
 *.img
 __pycache__/
