@@ -64,7 +64,7 @@ namespace SCLive4Emulator
         string Args(string script)
         {
             string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
-            string d = Distro.Length > 0 ? "-d \"" + Distro + "\" " : "";
+            string d = DistroArg();
             return d + "-u root -- bash -c \"echo " + b64 + " | base64 -d | bash\"";
         }
 
@@ -151,7 +151,7 @@ namespace SCLive4Emulator
         public Process KeepAlive()
         {
             // WSL can stop a distro once no wsl.exe is attached; this keeps it up while the deck runs.
-            string d = Distro.Length > 0 ? "-d \"" + Distro + "\" " : "";
+            string d = DistroArg();
             var psi = new ProcessStartInfo(WslExe, d + "-u root -- sleep infinity") { UseShellExecute = false, CreateNoWindow = true };
             try { return Process.Start(psi); } catch { return null; }
         }
@@ -165,6 +165,15 @@ namespace SCLive4Emulator
         }
 
         public static string Q(string s) { return "'" + s.Replace("'", "'\\''") + "'"; }
+
+        // wsl.exe takes the name as-is and does not strip quotes, so -d "Ubuntu" looks for a distro
+        // literally named "Ubuntu" with the quotes. Names can only use letters, digits, . - and _.
+        public static bool ValidName(string n)
+        {
+            return n.Length > 0 && n.All(c => (c < 128 && char.IsLetterOrDigit(c)) || c == '.' || c == '-' || c == '_');
+        }
+
+        string DistroArg() { return ValidName(Distro) ? "-d " + Distro + " " : ""; }
 
         public string Emu(string profile, string args)
         {
@@ -208,7 +217,7 @@ namespace SCLive4Emulator
         bool busy, polling;
 
         // controls
-        Panel setupBar;
+        Control setupBar;
         Label setupText;
         Button setupButton;
         ComboBox profileBox;
@@ -227,21 +236,71 @@ namespace SCLive4Emulator
 
         public MainForm()
         {
+            // Sizes below are written for 100% scaling (96 dpi). WinForms scales them up to the
+            // display's setting when the layout resumes, the same way designer-made forms do.
+            SuspendLayout();
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
             Text = "SC LIVE 4 Emulator";
-            ClientSize = new Size(940, 680);
-            MinimumSize = new Size(760, 560);
+            Font = new Font("Segoe UI", 9.5f);
+            ClientSize = new Size(980, 720);
+            MinimumSize = new Size(820, 600);
             BackColor = Bg;
             ForeColor = Fg;
-            Font = new Font("Segoe UI", 9.5f);
-            AutoScaleMode = AutoScaleMode.Dpi;
             AllowDrop = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
             settings = Settings.Load();
             Build();
+            ResumeLayout(false);
+            PerformLayout();
+            RestoreWindow();
             DragEnter += OnDragEnter;
             DragDrop += OnDragDrop;
             Shown += async (s, e) => await Init();
             FormClosing += OnClosing;
+        }
+
+        // ---------------------------------------------------------------- window position
+        bool startMaximized;
+
+        void RestoreWindow()
+        {
+            string v;
+            if (!settings.TryGetValue("Window", out v)) { StartPosition = FormStartPosition.CenterScreen; return; }
+            var n = v.Split(',').Select(x => { int i; return int.TryParse(x, out i) ? i : int.MinValue; }).ToArray();
+            if (n.Length < 4 || n.Any(i => i == int.MinValue)) { StartPosition = FormStartPosition.CenterScreen; return; }
+            var r = new Rectangle(n[0], n[1], Math.Max(n[2], MinimumSize.Width), Math.Max(n[3], MinimumSize.Height));
+            // Only use it if the title bar would land on a screen that's still connected.
+            var bar = new Rectangle(r.X + 40, r.Y, Math.Max(r.Width - 80, 40), 30);
+            if (!Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(bar))) { StartPosition = FormStartPosition.CenterScreen; Size = r.Size; return; }
+            StartPosition = FormStartPosition.Manual;
+            Bounds = r;
+            startMaximized = Get(settings, "Maximized") == "1";
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            if (startMaximized) WindowState = FormWindowState.Maximized;
+        }
+
+        void SaveWindow()
+        {
+            if (WindowState == FormWindowState.Minimized && RestoreBounds.Width == 0) return;
+            var r = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            settings["Window"] = r.X + "," + r.Y + "," + r.Width + "," + r.Height;
+            settings["Maximized"] = WindowState == FormWindowState.Maximized ? "1" : "0";
+            Settings.Save(settings);
+        }
+
+        static string Get(Dictionary<string, string> d, string k) { string v; return d.TryGetValue(k, out v) ? v : ""; }
+        bool Option(string k, bool def) { string v = Get(settings, k); return v.Length == 0 ? def : v == "1"; }
+        void SetOption(string k, bool on) { settings[k] = on ? "1" : "0"; Settings.Save(settings); }
+
+        // Pixel sizes that WinForms doesn't scale on its own (list columns).
+        int S(int px)
+        {
+            using (var g = CreateGraphics()) return (int)Math.Round(px * g.DpiX / 96f);
         }
 
         // ---------------------------------------------------------------- layout
@@ -249,7 +308,8 @@ namespace SCLive4Emulator
         {
             var b = new Button
             {
-                Text = text, AutoSize = false, Height = 34, Width = 128, FlatStyle = FlatStyle.Flat,
+                Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(primary ? 110 : 90, 34), Padding = new Padding(10, 2, 10, 2), FlatStyle = FlatStyle.Flat,
                 BackColor = primary ? Color.FromArgb(32, 110, 70) : Color.FromArgb(48, 52, 58),
                 ForeColor = Fg, Margin = new Padding(0, 0, 8, 0), Cursor = Cursors.Hand,
             };
@@ -261,6 +321,8 @@ namespace SCLive4Emulator
         void Build()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(16), BackColor = Bg };
+            // Without this the single column sizes to its widest child and runs off the right edge.
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // setup bar
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // header
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // buttons
@@ -270,13 +332,20 @@ namespace SCLive4Emulator
             Controls.Add(root);
 
             // setup bar (shown when WSL or the emulator is missing)
-            setupBar = new Panel { Dock = DockStyle.Top, Height = 54, BackColor = Color.FromArgb(70, 52, 20), Visible = false, Margin = new Padding(0, 0, 0, 12) };
-            setupText = new Label { AutoSize = false, Left = 12, Top = 8, Width = 600, Height = 40, ForeColor = Color.FromArgb(255, 226, 170), Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right };
+            var bar = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1,
+                BackColor = Color.FromArgb(70, 52, 20), Visible = false, Margin = new Padding(0, 0, 0, 12), Padding = new Padding(12, 10, 12, 10),
+            };
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            // AutoSize + left/right anchors makes a label wrap to its column and grow taller as needed.
+            setupText = new Label { AutoSize = true, Anchor = AnchorStyles.Left | AnchorStyles.Right, ForeColor = Color.FromArgb(255, 226, 170), Margin = new Padding(0, 0, 12, 0) };
             setupButton = MakeButton("Install", async (s, e) => await SetupAction(), true);
-            setupButton.Top = 10; setupButton.Width = 190; setupButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            setupBar.Controls.Add(setupText);
-            setupBar.Controls.Add(setupButton);
-            setupBar.Resize += (s, e) => { setupButton.Left = setupBar.Width - setupButton.Width - 12; setupText.Width = setupButton.Left - 24; };
+            setupButton.Anchor = AnchorStyles.Right; setupButton.Margin = new Padding(0);
+            bar.Controls.Add(setupText, 0, 0);
+            bar.Controls.Add(setupButton, 1, 0);
+            setupBar = bar;
             root.Controls.Add(setupBar);
 
             // header: title, deck picker, status
@@ -286,7 +355,7 @@ namespace SCLive4Emulator
             profileBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210, Margin = new Padding(0, 5, 6, 0), BackColor = Panel1, ForeColor = Fg, FlatStyle = FlatStyle.Flat };
             profileBox.SelectedIndexChanged += async (s, e) => { settings["Profile"] = CurrentProfile; Settings.Save(settings); await RefreshAll(); };
             var newDeck = MakeButton("New deck...", (s, e) => NewDeck());
-            newDeck.Width = 100; newDeck.Height = 28; newDeck.Margin = new Padding(0, 4, 18, 0);
+            newDeck.MinimumSize = new Size(0, 30); newDeck.Margin = new Padding(0, 3, 18, 0);
             statusLabel = new Label { AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 9, 0, 0), Text = "Checking WSL..." };
             header.Controls.AddRange(new Control[] { title, deckLabel, profileBox, newDeck, statusLabel });
             root.Controls.Add(header);
@@ -299,7 +368,6 @@ namespace SCLive4Emulator
             deckButton = MakeButton("Open deck", (s, e) => OpenUrl(Get("deck_url", "http://localhost:8090/")));
             consoleButton = MakeButton("EngineX console", (s, e) => OpenUrl(Get("console_url", "http://localhost:8080/")));
             var more = MakeButton("More...", (s, e) => ShowMoreMenu((Control)s));
-            more.Width = 90;
             actions.Controls.AddRange(new Control[] { startButton, stopButton, rebootButton, deckButton, consoleButton, more });
             root.Controls.Add(actions);
 
@@ -333,19 +401,21 @@ namespace SCLive4Emulator
             split.Controls.Add(dropZone, 0, 0);
 
             var drivesPanel = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Margin = new Padding(0) };
+            drivesPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             drivesPanel.Controls.Add(new Label { Text = "Drives plugged into this deck", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 0, 0, 4) });
             drivesList = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.None };
-            drivesList.Columns.Add("Label", 90);
-            drivesList.Columns.Add("Type", 70);
-            drivesList.Columns.Add("Folder", 300);
+            drivesList.Columns.Add("Label", S(100));
+            drivesList.Columns.Add("Type", S(80));
+            drivesList.Columns.Add("Folder", S(260));
             drivesPanel.Controls.Add(drivesList);
             var driveButtons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, 6, 0, 0) };
-            var addUsb = MakeButton("Add USB folder", async (s, e) => await PickDrive(false)); addUsb.Width = 120; addUsb.Height = 30;
-            var addSd = MakeButton("Add SD folder", async (s, e) => await PickDrive(true)); addSd.Width = 112; addSd.Height = 30;
-            var eject = MakeButton("Eject", async (s, e) => await EjectSelected()); eject.Width = 70; eject.Height = 30;
+            var addUsb = MakeButton("Add USB folder", async (s, e) => await PickDrive(false));
+            var addSd = MakeButton("Add SD folder", async (s, e) => await PickDrive(true));
+            var eject = MakeButton("Eject", async (s, e) => await EjectSelected());
+            foreach (var b in new[] { addUsb, addSd, eject }) b.MinimumSize = new Size(0, 30);
             driveButtons.Controls.AddRange(new Control[] { addUsb, addSd, eject });
             drivesPanel.Controls.Add(driveButtons);
             split.Controls.Add(drivesPanel, 1, 0);
@@ -446,7 +516,7 @@ namespace SCLive4Emulator
             order.AddRange(distros);
             order.Add("");
             string chosen = null;
-            foreach (var d in order.Distinct())
+            foreach (var d in order.Distinct().Where(x => x.Length == 0 || Wsl.ValidName(x)))
             {
                 statusLabel.Text = "Checking WSL " + (d.Length > 0 ? d : "default") + "...";
                 string name = await wsl.Probe(d);
@@ -501,7 +571,14 @@ namespace SCLive4Emulator
             ActionsEnabled(true);
             Log("Emulator: " + wsl.EmuDir + " in WSL " + wsl.Distro);
             await LoadProfiles();
+            await RefreshAll();
             pollTimer.Start();
+            if (Option("AutoStart", false))
+            {
+                if (Get("running", "no") == "yes") Log("The deck is already running.");
+                else if (Get("setup", "yes") == "no") Log("Not starting automatically: this deck isn't set up yet.");
+                else await StartDeck();
+            }
         }
 
         void ShowSetup(string text, string button)
@@ -628,11 +705,12 @@ namespace SCLive4Emulator
         {
             if (keepAlive == null || keepAlive.HasExited) keepAlive = wsl.KeepAlive();
             int rc = await Emu("Starting", "start");
-            if (rc == 0)
+            if (rc == 0 && Option("OpenDeck", true))
             {
                 Log("Engine takes a minute or two to show its first screen. Opening the deck page...");
                 OpenUrl(Get("deck_url", "http://localhost:8090/"));
             }
+            else if (rc == 0) Log("Deck started. Engine takes a minute or two to show its first screen.");
         }
 
         void NewDeck()
@@ -662,6 +740,13 @@ namespace SCLive4Emulator
                 SetBusy(false);
             });
             m.Items.Add("Open music folder", null, (s, e) => OpenUrl(Settings.MusicFolder));
+            m.Items.Add(new ToolStripSeparator());
+            var auto = new ToolStripMenuItem("Start the deck when the app opens") { Checked = Option("AutoStart", false), CheckOnClick = true };
+            auto.CheckedChanged += (s, e) => SetOption("AutoStart", auto.Checked);
+            var open = new ToolStripMenuItem("Open the deck page after starting") { Checked = Option("OpenDeck", true), CheckOnClick = true };
+            open.CheckedChanged += (s, e) => SetOption("OpenDeck", open.Checked);
+            m.Items.Add(auto);
+            m.Items.Add(open);
             m.Show(anchor, new Point(0, anchor.Height));
         }
 
@@ -798,6 +883,7 @@ namespace SCLive4Emulator
         // ---------------------------------------------------------------- closing
         async void OnClosing(object sender, FormClosingEventArgs e)
         {
+            SaveWindow();
             if (Get("running", "no") != "yes" || wsl.EmuDir.Length == 0) { StopKeepAlive(); return; }
             var r = MessageBox.Show(this, "The emulated deck is still running.\n\nStop it before closing?\n(No leaves it running in the background.)",
                                     "SC LIVE 4 Emulator", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
@@ -817,14 +903,16 @@ namespace SCLive4Emulator
         // ---------------------------------------------------------------- small dialog
         static string Prompt(string title, string text, string value)
         {
-            using (var f = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(420, 130), BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
+            using (var f = new Form { AutoScaleDimensions = new SizeF(96F, 96F), AutoScaleMode = AutoScaleMode.Dpi, Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(420, 130), BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
             {
+                f.SuspendLayout();
                 var l = new Label { Text = text, Left = 12, Top = 12, Width = 396, Height = 36 };
                 var t = new TextBox { Text = value, Left = 12, Top = 52, Width = 396, BackColor = Panel1, ForeColor = Fg };
-                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 248, Top = 90, Width = 75, FlatStyle = FlatStyle.Flat };
-                var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 333, Top = 90, Width = 75, FlatStyle = FlatStyle.Flat };
+                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 238, Top = 88, Width = 80, Height = 30, FlatStyle = FlatStyle.Flat };
+                var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 328, Top = 88, Width = 80, Height = 30, FlatStyle = FlatStyle.Flat };
                 f.Controls.AddRange(new Control[] { l, t, ok, cancel });
                 f.AcceptButton = ok; f.CancelButton = cancel;
+                f.ResumeLayout(false);
                 return f.ShowDialog() == DialogResult.OK ? t.Text.Trim() : null;
             }
         }
