@@ -262,6 +262,36 @@ namespace SCLive4Emulator
 
         // ---------------------------------------------------------------- window position
         bool startMaximized;
+        SplitContainer body;
+        bool placing;
+
+        // Where the divider between the files area and the log sits, as a share of the height,
+        // so it looks the same after resizing, maximising or a different display scale.
+        void PlaceDivider()
+        {
+            double f;
+            if (!double.TryParse(Get(settings, "LogSplit"), System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture, out f) || f < 0.2 || f > 0.85) f = 0.55;
+            int min1 = S(180), min2 = S(120);
+            int h = body.Height - body.SplitterWidth;
+            if (h <= min1 + min2) return;
+            // WinForms throws if the minimums and the distance disagree even briefly, hence the order and try.
+            try
+            {
+                body.SplitterDistance = Math.Max(min1, Math.Min(h - min2, (int)(h * f)));
+                if (body.Panel1MinSize != min1) body.Panel1MinSize = min1;
+                if (body.Panel2MinSize != min2) body.Panel2MinSize = min2;
+            }
+            catch { }
+        }
+
+        void SaveDivider()
+        {
+            int h = body.Height - body.SplitterWidth;
+            if (h <= 0) return;
+            settings["LogSplit"] = ((double)body.SplitterDistance / h).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+            Settings.Save(settings);
+        }
 
         void RestoreWindow()
         {
@@ -282,6 +312,10 @@ namespace SCLive4Emulator
         {
             base.OnLoad(e);
             if (startMaximized) WindowState = FormWindowState.Maximized;
+            placing = true; PlaceDivider(); placing = false;
+            body.SplitterMoved += (s, ev) => { if (!placing) SaveDivider(); };
+            // Keep the same proportions when the window changes size.
+            body.SizeChanged += (s, ev) => { placing = true; PlaceDivider(); placing = false; };
         }
 
         void SaveWindow()
@@ -320,15 +354,13 @@ namespace SCLive4Emulator
 
         void Build()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(16), BackColor = Bg };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16), BackColor = Bg };
             // Without this the single column sizes to its widest child and runs off the right edge.
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // setup bar
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // header
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // buttons
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));   // drop zone + drives
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // log label
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 45));   // log
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // files above, activity log below
             Controls.Add(root);
 
             // setup bar (shown when WSL or the emulator is missing)
@@ -372,7 +404,14 @@ namespace SCLive4Emulator
             root.Controls.Add(actions);
 
             // drop zone (left) + drives (right)
-            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };
+            // Drop zone + drives on top, activity log underneath, with a divider you can drag.
+            body = new SplitContainer
+            {
+                Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, Margin = new Padding(0),
+                SplitterWidth = 10, BackColor = Bg, FixedPanel = FixedPanel.None,
+            };
+            body.Panel1.BackColor = Bg; body.Panel2.BackColor = Bg;
+            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
             split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
             split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
             dropZone = new Panel { Dock = DockStyle.Fill, BackColor = Panel1, Margin = new Padding(0, 0, 10, 0), AllowDrop = true, Cursor = Cursors.Hand };
@@ -419,16 +458,22 @@ namespace SCLive4Emulator
             driveButtons.Controls.AddRange(new Control[] { addUsb, addSd, eject });
             drivesPanel.Controls.Add(driveButtons);
             split.Controls.Add(drivesPanel, 1, 0);
-            root.Controls.Add(split);
+            body.Panel1.Controls.Add(split);
+            root.Controls.Add(body);
 
-            root.Controls.Add(new Label { Text = "Activity", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 0, 0, 4) });
+            var logPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+            logPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            logPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            logPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            logPanel.Controls.Add(new Label { Text = "Activity", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 0, 0, 4) });
             logBox = new TextBox
             {
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true,
                 BackColor = Color.FromArgb(16, 17, 19), ForeColor = Color.FromArgb(190, 196, 204), BorderStyle = BorderStyle.None,
                 Font = new Font("Consolas", 9f),
             };
-            root.Controls.Add(logBox);
+            logPanel.Controls.Add(logBox);
+            body.Panel2.Controls.Add(logPanel);
 
             pollTimer = new Timer { Interval = 3000 };
             pollTimer.Tick += async (s, e) => await Poll();
