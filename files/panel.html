@@ -33,6 +33,7 @@ header a{color:#8bb8ff;text-decoration:none}
 .enc{border-radius:50%;background:repeating-conic-gradient(#3d4146 0 6deg,#2e3135 6deg 12deg);box-shadow:0 2px 3px #0009;cursor:ns-resize}
 .enc .cap{position:absolute;inset:24%;border-radius:50%;background:radial-gradient(circle at 40% 35%,#5a5e64,#2f3236);box-shadow:inset 0 1px 0 #ffffff22;cursor:pointer}
 .enc .cap.down{background:#6b7077}
+.btn.locked{background:#f0f2f5;color:#111;box-shadow:0 0 10px #f0f2f5}
 .track{position:absolute;background:#121315;border-radius:3px;box-shadow:inset 0 1px 2px #000}
 .cap2{position:absolute;background:linear-gradient(#cfd2d6,#8d9298);border-radius:3px;box-shadow:0 2px 3px #000a;cursor:grab}
 .cap2::after{content:"";position:absolute;left:10%;right:10%;top:50%;height:2px;margin-top:-1px;background:#222}
@@ -97,6 +98,24 @@ const post=(u,b)=>fetch(u,{method:"POST",body:b}).catch(()=>{});
 
 // ---------------------------------------------------------------- events to the server
 let q=[],busy=false;
+// SHIFT: hold it, double-click to lock it on (click again to unlock), or hold Shift on the
+// keyboard, which holds both decks' SHIFT. Engine sees one press until nothing holds it.
+const shifts={};
+function shiftSync(id){const s=shifts[id],on=s.mouse||s.key||s.locked;
+  if(on!==s.sent){s.sent=on;send(id+(on?" press":" release"))}
+  s.d.classList.toggle("down",on);s.d.classList.toggle("locked",s.locked);s.d.textContent=s.locked?"SHIFT \u{1F512}":"SHIFT"}
+function shiftBtn(c,d){const s=shifts[c.id]={d,mouse:false,key:false,locked:false,sent:false,last:0};
+  d.title="Hold for shift. Double-click to lock it on. The keyboard's Shift key works too.";
+  d.addEventListener("pointerdown",e=>{e.preventDefault();d.setPointerCapture(e.pointerId);const t=performance.now();
+    if(s.locked){s.locked=false;s.last=0}else if(t-s.last<350){s.locked=true;s.last=0}else{s.last=t}
+    s.mouse=true;shiftSync(c.id)});
+  const up=()=>{if(s.mouse){s.mouse=false;shiftSync(c.id)}};
+  d.addEventListener("pointerup",up);d.addEventListener("pointercancel",up);
+  views[c.id]={led(){}}}
+const typing=e=>{const t=e.target;return t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.tagName==="SELECT"||t.isContentEditable)};
+addEventListener("keydown",e=>{if(e.key!=="Shift"||e.repeat||typing(e))return;for(const id in shifts){shifts[id].key=true;shiftSync(id)}});
+addEventListener("keyup",e=>{if(e.key!=="Shift")return;for(const id in shifts){shifts[id].key=false;shiftSync(id)}});
+addEventListener("blur",()=>{for(const id in shifts){if(shifts[id].key){shifts[id].key=false;shiftSync(id)}}});
 function send(line){q.push(line);if(!busy)flush()}
 async function flush(){busy=true;while(q.length){const b=q.splice(0).join("\n");await post("/control",b)}busy=false}
 
@@ -125,7 +144,7 @@ const builders={
  panel(c){el(c,"mixbg")},
  label(c){const d=el(c,"text"+(c.big?" big":""));d.textContent=c.lab},
  btn(c){const d=el(c,"btn"+(c.round?" round":"")+(c.small?" small":"")+(c.big?" big":""));d.textContent=c.lab;
-  if(c.big||c.round){}
+  if(/_shift$/.test(c.id))return shiftBtn(c,d);
   d.addEventListener("pointerdown",e=>{e.preventDefault();d.setPointerCapture(e.pointerId);d.classList.add("down");send(c.id+" press")});
   const up=()=>{if(d.classList.contains("down")){d.classList.remove("down");send(c.id+" release")}};
   d.addEventListener("pointerup",up);d.addEventListener("pointercancel",up);
@@ -149,11 +168,15 @@ const builders={
   views[c.id]={value(nv){v=nv;show(v)}}},
  enc(c){const d=el(c,"enc");d.innerHTML='<div class="cap"></div>';label(d,c.lab);const cap=d.querySelector(".cap");
   let acc=0,rot=0;const turn=n=>{rot+=n*15;d.style.backgroundImage=`repeating-conic-gradient(from ${rot}deg,#3d4146 0 6deg,#2e3135 6deg 12deg)`;send(`${c.id} turn ${n}`)};
-  drag(d,(e,dx,dy)=>{acc+=(-dy+dx)/7;const n=Math.trunc(acc);if(n){acc-=n;turn(n)}});
+  // Drag anywhere on it to turn. A click without moving pushes it; holding still holds the push.
+  let moved=0,pushed=false,holdT=0;
+  const push=()=>{if(!pushed&&c.push!=null){pushed=true;cap.classList.add("down");send(c.id+" press")}};
+  drag(d,(e,dx,dy)=>{moved+=Math.abs(dx)+Math.abs(dy);if(moved<4)return;clearTimeout(holdT);
+      acc+=(-dy+dx)/7;const n=Math.trunc(acc);if(n){acc-=n;turn(n)}},
+    ()=>{moved=0;acc=0;clearTimeout(holdT);holdT=setTimeout(()=>{if(moved<4)push()},350)},
+    ()=>{clearTimeout(holdT);if(moved<4&&!pushed)push();
+      if(pushed){setTimeout(()=>{cap.classList.remove("down");send(c.id+" release");pushed=false},pushed?60:0)}});
   d.addEventListener("wheel",e=>{e.preventDefault();turn(e.deltaY<0?1:-1)},{passive:false});
-  cap.addEventListener("pointerdown",e=>{e.stopPropagation();e.preventDefault();cap.setPointerCapture(e.pointerId);cap.classList.add("down");send(c.id+" press")});
-  const up=()=>{if(cap.classList.contains("down")){cap.classList.remove("down");send(c.id+" release")}};
-  cap.addEventListener("pointerup",up);cap.addEventListener("pointercancel",up);
   views[c.id]={led(v){cap.style.boxShadow=v?"0 0 10px #4aa3ff,inset 0 0 0 2px #4aa3ff":""}}},
  fader(c){vfader(c,127,true)},
  pitch(c){vfader(c,16383,false)},

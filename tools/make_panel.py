@@ -16,7 +16,7 @@ Control types:
   pitch  14-bit pitch fader (cc = MSB, cc2 = LSB), value 0-16383, top = 0
   jog    14-bit absolute jog position (cc/cc2) + touch note
   sw     switch: a note whose velocity is the position (vals), latched
-  sel    rotary selector: CC with one value per position (vals)
+  sel    rotary selector: one value per position (vals), sent as CC `cc` or as note `n` + velocity
   vu     LED meter driven by a CC (bitwise: 0,1,3,7,15,31,63)
   label  text only
 """
@@ -69,7 +69,6 @@ def deck(side, ox, ch):
     add(t="btn", id=p + "slip", lab="SLIP", x=ox + 472, y=90, w=48, h=26, ch=ch, n=36, col="#3aa0ff")
     add(t="pitch", id=p + "pitch", lab="TEMPO", x=ox + 478, y=200, w=40, h=360, ch=ch, cc=0x1F, cc2=0x4B, led=42)
     add(t="btn", id=p + "keylock", lab="KEY", x=ox + 428, y=470, w=38, h=24, ch=ch, n=34)
-    add(t="knob", id=p + "stoptime", lab="STOP TIME", x=ox + 424, y=516, w=40, h=40, ch=ch, cc=37, d=64)
     add(t="btn", id=p + "bendm", lab="−", x=ox + 458, y=580, w=30, h=26, ch=ch, n=29)
     add(t="btn", id=p + "bendp", lab="+", x=ox + 492, y=580, w=30, h=26, ch=ch, n=30)
     add(t="label", lab="PITCH BEND", x=ox + 450, y=608, w=80, h=14)
@@ -128,7 +127,8 @@ add(t="knob", id="master", lab="MASTER", x=1188 + 52, y=MY + 12, w=46, h=46, ch=
 add(t="vu", id="vuL", x=1198, y=MY + 70, w=10, h=150, ch=G, cc=32)
 add(t="vu", id="vuR", x=1212, y=MY + 70, w=10, h=150, ch=G, cc=33)
 add(t="enc", id="fxselect", lab="FX SELECT", x=1250, y=MY + 76, w=48, h=48, ch=G, cc=35, push=30)
-add(t="sel", id="fxassign", lab="FX CHANNEL", x=1246, y=MY + 160, w=56, h=56, ch=G, cc=40, vals=[0, 1, 2, 3, 127], labs=["3", "1", "2", "4", "M"], d=1)
+# Engine reads the FX channel switch as note 40 with the position in the velocity (DJFxAssignSwitch).
+add(t="sel", id="fxassign", lab="FX CHANNEL", x=1246, y=MY + 160, w=56, h=56, ch=G, n=40, vals=[0, 1, 2, 3, 127], labs=["3", "1", "2", "4", "M"], d=1)
 add(t="enc", id="fxtime", lab="FX PARAM/TIME", x=1250, y=MY + 250, w=48, h=48, ch=G, cc=36, push=25)
 add(t="knob", id="fxamount", lab="FX AMOUNT", x=1250, y=MY + 330, w=48, h=48, ch=G, cc=4, d=0)
 add(t="btn", id="fxon", lab="FX ON", x=1240, y=MY + 410, w=68, h=68, ch=G, n=26, round=1, col="#2a8cff", big=1)

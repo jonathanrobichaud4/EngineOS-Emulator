@@ -136,7 +136,10 @@ class Surface:
             val = c["vals"][int(v)]
             return [f"{0x90 | ch:02x} {c['n']:02x} {val:02x}" if val else f"{0x80 | ch:02x} {c['n']:02x} 00"]
         if t == "sel":
-            return [f"{0xB0 | ch:02x} {c['cc']:02x} {c['vals'][int(v)]:02x}"]
+            val = c["vals"][int(v)]
+            if "n" in c:  # a switch Engine reads as a note whose velocity is the position
+                return [f"{0x90 | ch:02x} {c['n']:02x} {val:02x}"]
+            return [f"{0xB0 | ch:02x} {c['cc']:02x} {val:02x}"]
         return []
 
     def event(self, line):
