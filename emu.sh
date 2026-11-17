@@ -91,6 +91,9 @@ deps() {
     command -v iptables >/dev/null || miss+=(iptables)
     command -v nsenter >/dev/null || miss+=(util-linux)
     python3 -c 'import jeepney' 2>/dev/null || miss+=(python3-jeepney)
+    # The software waveforms: ffmpeg decodes the tracks, numpy splits them into bands.
+    python3 -c 'import numpy' 2>/dev/null || miss+=(python3-numpy)
+    command -v ffmpeg >/dev/null || miss+=(ffmpeg)
     if [ ${#miss[@]} -gt 0 ]; then
         say "installing ${miss[*]}"
         apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${miss[@]}"
@@ -163,6 +166,32 @@ mounts_up() {
         grep -v '^nameserver 127' /etc/resolv.conf > "$R/run/connman/resolv.conf" 2>/dev/null || :
         echo "nameserver 1.1.1.1" >> "$R/run/connman/resolv.conf"
     fi
+}
+
+# The emulator's QML additions (files/qml-inject): Engine's waveforms need OpenGL, so the emulator
+# switches those items off and adds its own software-drawn waveform to their QML. The shim adds
+# the snippets to Engine's compiled-in files; EngineX's UI pack has its own copies of some of
+# them, so those get an injected copy bind-mounted over them while the deck runs.
+qml_inject() {
+    local spec res src rel gen
+    rm -rf "$R/etc/emu/qml-inject" "$R/etc/emu/qml-gen"
+    for spec in "$HERE"/files/qml-inject/*.inject; do
+        [ -f "$spec" ] || continue
+        res=$(sed -n 's/^path: //p' "$spec" | head -n1)
+        mkdir -p "$R/etc/emu/qml-inject$(dirname "$res")"
+        cp "$spec" "$R/etc/emu/qml-inject$res"
+        for src in "$R"/data/enginex/ui/packs/*"$res"; do
+            [ -f "$src" ] || continue
+            grep -qF " $src " /proc/self/mounts && continue
+            rel=${src#"$R"/data/enginex/ui/}; gen="$R/etc/emu/qml-gen/$rel"
+            mkdir -p "$(dirname "$gen")"
+            if python3 "$HERE/tools/qml_inject.py" "$spec" "$src" "$gen"; then
+                mount --bind "$gen" "$src" || :
+            else
+                say "note: ${spec##*/} doesn't fit EngineX's $rel (waveforms stay blank there)"
+            fi
+        done
+    done
 }
 
 mounts_down() {
@@ -304,7 +333,7 @@ engine_loop() {
         echo "=== Engine start #$n $(date '+%F %T') preload=$preload" >> "$STATE/engine.log"
         in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} LD_PRELOAD="$preload" \
             QT_QPA_PLATFORM="offscreen:configfile=/etc/emu/screen.json" QT_QUICK_BACKEND=software \
-            MALLOC_ARENA_MAX=1 \
+            MALLOC_ARENA_MAX=1 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
             /usr/Engine/Engine -d0 -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
         echo "=== Engine exited $(date '+%F %T')" >> "$STATE/engine.log"
@@ -322,8 +351,9 @@ cmd_start() {
             die "another profile is running ($(basename "$(dirname "$other")")); stop it first"
     done
     local stock=0; [ "${1:-}" = --stock ] && stock=1
-    deps; binfmt; prepare_rootfs >/dev/null; mounts_up
+    deps; binfmt; prepare_rootfs >/dev/null; mounts_up; qml_inject
     mkdir -p "$STATE"; : > "$STATE/engine.log"
+    rm -rf "$R/tmp/emu/wave/req"
     [ -S "$R/run/dbus/system_bus_socket" ] || in_root /usr/bin/dbus-daemon --system --fork --nopidfile
     net_up
     python3 "$HERE/edisks_emu.py" --rootfs "$R" --drives "$HERE/drives.txt" </dev/null > "$STATE/edisks.log" 2>&1 &

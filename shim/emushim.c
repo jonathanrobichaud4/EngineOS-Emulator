@@ -271,6 +271,84 @@ static uchar *ovl_blob(const char *path) {
     close(fd);
     return b;
 }
+/* Injection: /etc/emu/qml-inject/<resource path> is an .inject spec (see tools/qml_inject.py):
+ * header lines, "---", then QML to insert after the first line reading exactly `after:`. Used for
+ * the software waveform. The compiled-in file is zstd or zlib compressed; the chroot's own
+ * libzstd/libz unpack it. Returns a new uncompressed blob, or NULL to leave the resource alone. */
+static char *inj_read(const char *path, size_t *len) {
+    FILE *f = fopen(path, "rb"); if (!f) return NULL;
+    char *buf = NULL; size_t cap = 0, n = 0, r;
+    do { if (n + 4096 > cap && !(buf = realloc(buf, cap = cap * 2 + 8192))) { fclose(f); return NULL; }
+         r = fread(buf + n, 1, cap - n - 1, f); n += r; } while (r > 0);
+    fclose(f); buf[n] = 0; *len = n; return buf;
+}
+static uchar *inj_plain(const uchar *blob, uint16_t flags, size_t *out_len) {
+    uint32_t n = rd32(blob); const uchar *p = blob + 4;
+    if ((flags & RCC_ZSTD) || (n >= 4 && p[0] == 0x28 && p[1] == 0xb5 && p[2] == 0x2f && p[3] == 0xfd)) {
+        void *z = dlopen("libzstd.so.1", RTLD_NOW);
+        unsigned long long (*size)(const void *, size_t) = z ? dlsym(z, "ZSTD_getFrameContentSize") : NULL;
+        size_t (*dec)(void *, size_t, const void *, size_t) = z ? dlsym(z, "ZSTD_decompress") : NULL;
+        if (!size || !dec) return NULL;
+        unsigned long long want = size(p, n);
+        if (want == 0 || want > (64u << 20)) return NULL;
+        uchar *out = malloc(want + 1); if (!out) return NULL;
+        size_t got = dec(out, want, p, n);
+        if (got != want) { free(out); return NULL; }
+        *out_len = got; return out;
+    }
+    if (flags & RCC_COMPRESSED) {
+        void *z = dlopen("libz.so.1", RTLD_NOW);
+        int (*unc)(uchar *, unsigned long *, const uchar *, unsigned long) = z ? dlsym(z, "uncompress") : NULL;
+        if (!unc || n < 4) return NULL;
+        unsigned long want = rd32(p);
+        if (want > (64u << 20)) return NULL;
+        uchar *out = malloc(want + 1); if (!out) return NULL;
+        if (unc(out, &want, p + 4, n - 4) != 0) { free(out); return NULL; }
+        *out_len = want; return out;
+    }
+    uchar *out = malloc(n + 1); if (!out) return NULL;
+    memcpy(out, p, n); *out_len = n; return out;
+}
+static uchar *inj_blob(const char *spec_path, const uchar *blob, uint16_t flags) {
+    size_t slen; char *spec = inj_read(spec_path, &slen);
+    if (!spec) return NULL;
+    char *sep = strstr(spec, "\n---\n"), *after = strstr(spec, "after:");
+    if (!sep || !after || after > sep) { free(spec); return NULL; }
+    after += 6; while (*after == ' ') after++;
+    size_t alen = strcspn(after, "\n"); while (alen && (after[alen - 1] == ' ' || after[alen - 1] == '\r')) alen--;
+    const char *body = sep + 5;
+    size_t tlen; uchar *text = inj_plain(blob, flags, &tlen);
+    if (!text) { free(spec); return NULL; }
+    /* find the anchor line */
+    size_t i = 0, at = (size_t)-1, ind = 0;
+    while (i < tlen) {
+        size_t e = i; while (e < tlen && text[e] != '\n') e++;
+        size_t a = i; while (a < e && (text[a] == ' ' || text[a] == '\t')) a++;
+        size_t z = e; while (z > a && (text[z - 1] == ' ' || text[z - 1] == '\r')) z--;
+        if (z - a == alen && !memcmp(text + a, after, alen)) { at = e < tlen ? e + 1 : e; ind = a - i; break; }
+        i = e + 1;
+    }
+    if (at == (size_t)-1) { fprintf(stderr, "emushim: qml inject %s: anchor not found\n", spec_path); free(text); free(spec); return NULL; }
+    size_t blen = strlen(body), lines = 1;
+    for (size_t k = 0; k < blen; k++) lines += body[k] == '\n';
+    uchar *out = malloc(4 + tlen + blen + lines * (ind + 1) + 2);
+    if (!out) { free(text); free(spec); return NULL; }
+    size_t o = 4;
+    memcpy(out + o, text, at); o += at;
+    if (at && text[at - 1] != '\n') out[o++] = '\n';
+    for (const char *l = body; *l;) {
+        const char *e = strchr(l, '\n'); size_t ll = e ? (size_t)(e - l) : strlen(l);
+        if (ll) { for (size_t k = 0; k < ind; k++) out[o++] = ' '; memcpy(out + o, l, ll); o += ll; }
+        out[o++] = '\n';
+        if (!e) break;
+        l = e + 1;
+    }
+    memcpy(out + o, text + at, tlen - at); o += tlen - at;
+    wr32(out, (uint32_t)(o - 4));
+    free(text); free(spec);
+    return out;
+}
+
 static int ovl_name(const struct ovl *w, uint32_t off, char *out, size_t n) {
     const uchar *p = w->names + off; size_t len = rd16(p);
     if (!len || len + 1 > n) return 0;
@@ -306,7 +384,10 @@ static void ovl_apply(struct ovl *w, uint32_t node, const char *prefix, int dept
       } }
     char file[700]; snprintf(file, sizeof file, OVL_ROOT "%s", path);
     uchar *b = ovl_blob(file);
-    if (!b) return;
+    if (!b) {
+        snprintf(file, sizeof file, "/etc/emu/qml-inject%s", path);
+        if (access(file, R_OK) || !(b = inj_blob(file, w->data + rd32(e + 10), flags))) return;
+    }
     wr32(e + 10, (uint32_t)((uintptr_t)b - (uintptr_t)w->data));
     flags &= ~(RCC_COMPRESSED | RCC_ZSTD); e[4] = flags >> 8; e[5] = flags;
     if (w->node_size >= 22) { /* content-based timestamp so Engine's forced .qmlc cache recompiles */

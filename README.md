@@ -13,10 +13,11 @@ Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with E
 | USB drives and SD card | Any folder on your PC. Engine sees it plugged in, mounts it, writes its Engine Library to it and plays from it. |
 | Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, so streaming logins, update checks and online features should work. |
 | Reboot | The **Reboot** button restarts the whole emulated deck. |
+| Waveforms | Main waveforms and overviews, drawn by the emulator (see below). |
 
 Not emulated yet:
 
-- **Waveforms.** Engine draws them with OpenGL and the emulator renders without a GPU, so the waveform areas stay empty (everything else on the screen works).
+- **Engine's own waveform drawing.** Engine draws waveforms with OpenGL and the emulator renders without a GPU, so the emulator draws its own instead: it decodes the track (ffmpeg), splits it into low, mid and high bands, and scrolls that picture with the play position. The shape and timing are right but the look isn't Engine's exactly, and cue, loop and beat-grid markers on the waveform aren't drawn yet. Streaming tracks don't get a waveform yet, only files on drives.
 - Mic and aux inputs (silent), the USB audio gadget, Bluetooth, Wi-Fi, and the jog wheel displays.
 - Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
@@ -126,6 +127,7 @@ To test a different stock firmware, run `setup` again with the other `.img`. It 
   - `emushim.c` copies every frame into `/tmp/emu/fb`, turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `files/qml/`, and reports crashes with the library and offset.
   - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
 - `files/qml/` replaces built-in QML that needs a GPU. Right now that's `UIKit/Icons/ColoredImage.qml`, which every icon goes through.
+- Waveforms: `viewer.py` (class `Waves`) renders each loaded track to PNGs. The QML that shows them is in `files/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
 - `tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
 - `edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
 - `viewer.py` serves the page (`files/panel.html`, drawn from `files/panel.json`), turns panel actions into the JP21 MIDI messages (`tools/make_panel.py` holds the map, taken from Engine's own JP21 assignment file), answers Engine's "report all controls" query like the hardware does, and streams the audio.
