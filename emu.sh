@@ -11,6 +11,7 @@
 #                                                        (sudo EMU_NET=0 ./emu.sh start: no network)
 #   sudo ./emu.sh drive add FOLDER [--sd] [--label NAME]  plug a folder in as a USB drive / SD card
 #   sudo ./emu.sh drive remove LABEL | drive list
+#   sudo ./emu.sh mod-install MOD.tar.gz                 install and enable a mod (while running)
 #   sudo ./emu.sh dump-qml OUTDIR [FILTER]               write Engine's built-in QML out as files
 #   sudo ./emu.sh stop | reboot | restart | status | shell | log | tap X Y | reset-data
 set -euo pipefail
@@ -396,6 +397,70 @@ cmd_dump_qml() {
     mounts_down
 }
 
+cmd_info() {
+    # Machine-readable state for the Windows app: key=value lines.
+    echo "profile=${PROFILE:-default}"
+    [ -x "$R/usr/Engine/Engine" ] && echo "setup=yes" || echo "setup=no"
+    if [ -f "$R/data/enginex/version.txt" ]; then echo "enginex=$(head -n1 "$R/data/enginex/version.txt")"; else echo "enginex="; fi
+    running && echo "running=yes" || echo "running=no"
+    pgrep -f '/usr/Engine/Engine -d0' >/dev/null && echo "engine=up" || echo "engine=down"
+    if [ -e /run/netns/$NETNS ]; then echo "ip=$(ip -n $NETNS -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"; else echo "ip="; fi
+    echo "deck_url=http://localhost:$VIEW_PORT/"
+    echo "console_url=http://localhost:$CONSOLE_PORT/"
+}
+
+cmd_profiles() {
+    # One line per deck: name <TAB> set up? <TAB> EngineX version
+    local d name
+    for d in "$HERE"/rootfs "$HERE"/rootfs-*; do
+        [ -d "$d" ] || continue
+        name=${d##*/rootfs}; name=${name#-}; [ -n "$name" ] || name=default
+        printf '%s\t%s\t%s\n' "$name" "$([ -x "$d/usr/Engine/Engine" ] && echo yes || echo no)" \
+            "$(head -n1 "$d/data/enginex/version.txt" 2>/dev/null || :)"
+    done
+}
+
+cmd_identify() {
+    # What a dropped file is: firmware | enginex | mod | unknown
+    local f=${1:-}
+    [ -f "$f" ] || { echo unknown; return; }
+    case "$f" in
+        *.img|*.IMG)
+            if [ "$(head -c4 "$f" 2>/dev/null)" = AZ0x ]; then echo firmware; else echo enginex; fi ;;
+        *.tar.gz|*.tgz|*.TAR.GZ)
+            local list; list=$(tar tzf "$f" 2>/dev/null | head -n 400)
+            if echo "$list" | grep -q '/mod.json$\|^mod.json$'; then echo mod
+            elif echo "$list" | grep -q 'install.sh$'; then echo enginex
+            else echo unknown; fi ;;
+        *) echo unknown ;;
+    esac
+}
+
+cmd_mod_install() {
+    # Uploads a mod package through EngineX on the deck itself (loopback needs no console
+    # login), enables it and restarts Engine so its QML loads.
+    need_root
+    local f=${1:-}
+    [ -f "$f" ] || die "usage: sudo ./emu.sh mod-install MOD.tar.gz"
+    running || die "start the emulator first"
+    local id
+    id=$(tar xzOf "$f" --wildcards '*mod.json' 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') ||
+        die "not a mod package (no mod.json)"
+    cp "$f" "$R/tmp/emu/mod-upload.tar.gz"
+    local out
+    out=$(in_deck /usr/bin/curl -s -m 60 -F "file=@/tmp/emu/mod-upload.tar.gz" http://127.0.0.1:$CONSOLE_PORT/v1/sc5000/mods/upload) ||
+        die "upload failed (is EngineX running?)"
+    rm -f "$R/tmp/emu/mod-upload.tar.gz"
+    case "$out" in
+        *'already installed'*) say "$id is already installed; enabling it" ;;
+        *'"error":"'[!\"]*) die "EngineX refused it: $out" ;;
+    esac
+    in_deck /usr/bin/curl -s -m 30 -H 'Content-Type: application/json' -d "{\"id\":\"$id\",\"enabled\":true}" \
+        http://127.0.0.1:$CONSOLE_PORT/v1/sc5000/mods >/dev/null || die "couldn't enable $id"
+    echo restart > "$R/tmp/emu/engine-ctl"; pkill -f '/usr/Engine/Engine -d0' || :
+    say "installed and enabled $id; Engine is restarting"
+}
+
 cmd_tap() { printf 'down %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; sleep 0.2; printf 'up %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; }
 
 case "${1:-}" in
@@ -411,9 +476,13 @@ case "${1:-}" in
     tap) cmd_tap "$2" "$3" ;;
     drive) shift; cmd_drive "$@" ;;
     dump-qml) shift; cmd_dump_qml "$@" ;;
+    info) cmd_info ;;
+    profiles) cmd_profiles ;;
+    identify) shift; cmd_identify "$@" ;;
+    mod-install) shift; cmd_mod_install "$@" ;;
     reset-data)
         need_root; running && die "stop it first"
         rm -rf "$R/data/AppDataUser" "$R/data/StreamingAccounts.json"
         say "Engine settings and library reset (EngineX kept)" ;;
-    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

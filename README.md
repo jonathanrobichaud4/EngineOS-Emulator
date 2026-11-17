@@ -21,6 +21,16 @@ Not emulated yet:
 - Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
 
+## Windows app (no command line)
+
+`windows/SCLive4Emulator.exe` is a small Windows program for all of this. Download it from the [latest release](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/latest) (or `windows/` in this repo) and run it; it needs nothing installed beyond Windows 10 or 11.
+
+- It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/sclive4-emulator` in Ubuntu), and finds an older copy and moves your deck over.
+- **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\SC LIVE 4 Emulator`, which is plugged in as the EMULATOR drive.
+- Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
+
+Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler).
+
 ## What you need
 
 - Windows 10/11 with WSL2 and Ubuntu (22.04 or 24.04). If you don't have it, open PowerShell as admin and run `wsl --install -d Ubuntu`, then reboot.
@@ -97,6 +107,8 @@ Drives stay attached across restarts. Engine writes its `Engine Library` folder 
 | `sudo ./emu.sh start --stock` | Runs stock Engine without the EngineX hook |
 | `sudo ./emu.sh reset-data` | Clears Engine's settings and library so first-run starts again |
 | `sudo EMU_NET=0 ./emu.sh start` | Runs with no network |
+| `sudo ./emu.sh mod-install MOD.tar.gz` | Uploads, enables and loads a mod (deck running) |
+| `sudo ./emu.sh info` / `profiles` / `identify FILE` | Machine-readable state, decks and file types (used by the Windows app) |
 | `sudo ./emu.sh dump-qml DIR [FILTER]` | Writes Engine's built-in QML (and other resources) out as files, for reading or for building mods kept as patches |
 
 ## Testing mods
