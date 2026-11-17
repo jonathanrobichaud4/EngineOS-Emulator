@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EngineX emulator: SC LIVE 4</title>
+<style>
+:root{--bg:#0d0e10;--deck:#2a2d31;--deck2:#232528;--line:#3b3f45;--txt:#c9ccd1;--dim:#7d828a;--btn:#3a3d42;--btn2:#45494f}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+header{height:42px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#16181b;border-bottom:1px solid #26292d}
+header b{font-size:14px;color:#e6e8eb;margin-right:6px}
+header button,header select{background:#2a2d32;color:#dfe2e6;border:1px solid #3a3e44;border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+header button:hover{background:#33373d}
+header button.on{background:#1f5f3a;border-color:#2f8a55}
+header a{color:#8bb8ff;text-decoration:none}
+#st{margin-left:auto;color:var(--dim);font-variant-numeric:tabular-nums}
+#stage{position:absolute;top:42px;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center}
+#panel{position:relative;width:1900px;height:1080px;transform-origin:0 0;background:linear-gradient(#303338,#26282c);border-radius:18px;box-shadow:0 10px 40px #000a,inset 0 1px 0 #ffffff14}
+.c{position:absolute;user-select:none;-webkit-user-select:none;touch-action:none}
+.lab{position:absolute;left:-20px;right:-20px;text-align:center;font-size:10px;letter-spacing:.04em;color:var(--dim);pointer-events:none;white-space:nowrap}
+.lab.below{top:calc(100% + 3px)}
+.text{color:var(--dim);font-size:10px;letter-spacing:.06em;text-align:center}
+.text.big{font-size:16px;color:#d8dbe0;font-weight:600}
+.btn{border-radius:5px;background:var(--btn);border:1px solid #1d1f22;box-shadow:inset 0 1px 0 #ffffff1a,0 2px 0 #0006;display:flex;align-items:center;justify-content:center;color:#d6d9de;font-size:10px;font-weight:600;letter-spacing:.03em;cursor:pointer}
+.btn.small{font-size:8.5px}
+.btn.big{font-size:14px}
+.btn.round{border-radius:50%}
+.btn.down{transform:translateY(1px);box-shadow:inset 0 1px 3px #0008}
+.pad{border-radius:6px;background:#1c1e21;border:1px solid #111;box-shadow:inset 0 0 0 1px #ffffff12;color:#ffffff60;font-size:11px;display:flex;align-items:flex-end;justify-content:flex-end;padding:4px 6px;cursor:pointer}
+.pad.down{transform:scale(.97)}
+.knob{border-radius:50%;background:radial-gradient(circle at 40% 35%,#55595f,#2c2f33 70%);box-shadow:0 2px 3px #0009,inset 0 1px 0 #ffffff22;cursor:ns-resize}
+.knob .ptr{position:absolute;left:50%;top:6%;width:3px;height:38%;margin-left:-1.5px;background:#e9ecef;border-radius:2px;transform-origin:50% 115%}
+.knob svg,.enc svg{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);pointer-events:none}
+.enc{border-radius:50%;background:repeating-conic-gradient(#3d4146 0 6deg,#2e3135 6deg 12deg);box-shadow:0 2px 3px #0009;cursor:ns-resize}
+.enc .cap{position:absolute;inset:24%;border-radius:50%;background:radial-gradient(circle at 40% 35%,#5a5e64,#2f3236);box-shadow:inset 0 1px 0 #ffffff22;cursor:pointer}
+.enc .cap.down{background:#6b7077}
+.track{position:absolute;background:#121315;border-radius:3px;box-shadow:inset 0 1px 2px #000}
+.cap2{position:absolute;background:linear-gradient(#cfd2d6,#8d9298);border-radius:3px;box-shadow:0 2px 3px #000a;cursor:grab}
+.cap2::after{content:"";position:absolute;left:10%;right:10%;top:50%;height:2px;margin-top:-1px;background:#222}
+.xcap::after{left:50%;right:auto;top:10%;bottom:10%;width:2px;height:auto;margin:0 0 0 -1px}
+.jog{border-radius:50%;background:radial-gradient(circle,#2a2d31 0 46%,#1b1d20 47% 49%,repeating-conic-gradient(#3a3e44 0 2deg,#2c2f34 2deg 4deg) 50% 100%);box-shadow:0 6px 18px #000a,inset 0 0 0 2px #00000080;cursor:grab}
+.jog .top{position:absolute;inset:18%;border-radius:50%;background:radial-gradient(circle at 45% 40%,#3f444b,#1f2124);box-shadow:inset 0 0 0 2px #ffffff10}
+.jog .mark{position:absolute;left:50%;top:2%;width:4px;height:12%;margin-left:-2px;background:#e8eaed;border-radius:2px;transform-origin:50% 400%}
+.jog .info{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#9aa0a8;font-size:14px;font-weight:600;pointer-events:none}
+.jog.touched .top{box-shadow:inset 0 0 0 3px #4aa3ff}
+.sw{display:flex;border-radius:4px;overflow:hidden;border:1px solid #1d1f22;background:#1a1c1f}
+.sw div{flex:1;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:#8a9097;cursor:pointer}
+.sw div.on{background:#5a5f66;color:#fff}
+.sel{border-radius:50%;background:radial-gradient(circle at 40% 35%,#55595f,#2c2f33 70%);cursor:pointer;box-shadow:0 2px 3px #0009}
+.sel .ptr{position:absolute;left:50%;top:8%;width:3px;height:40%;margin-left:-1.5px;background:#e9ecef;transform-origin:50% 105%}
+.sel .opt{position:absolute;font-size:9px;color:#8a9097;width:14px;margin:-6px 0 0 -7px;text-align:center}
+.sel .opt.on{color:#fff;font-weight:700}
+.vu{display:flex;flex-direction:column-reverse;gap:2px}
+.vu i{flex:1;border-radius:1px;background:#202225}
+.screen{background:#000;border-radius:4px;box-shadow:0 0 0 10px #17181a,0 0 0 11px #3a3d42}
+.screen canvas{width:100%;height:100%;display:block;cursor:pointer;border-radius:4px}
+.mixbg{background:var(--deck2);border-radius:10px;box-shadow:inset 0 0 0 1px #ffffff0d}
+dialog{background:#1b1d21;color:var(--txt);border:1px solid #33373d;border-radius:10px;min-width:520px;padding:18px}
+dialog h3{margin:0 0 10px;font-size:15px;color:#e6e8eb}
+dialog table{width:100%;border-collapse:collapse;margin:8px 0 14px}
+dialog td{padding:6px 4px;border-bottom:1px solid #2a2d32}
+dialog input,dialog select{background:#111316;color:#e6e8eb;border:1px solid #3a3e44;border-radius:6px;padding:6px 8px;font:inherit}
+dialog button{background:#2a2d32;color:#dfe2e6;border:1px solid #3a3e44;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+dialog .row{display:flex;gap:8px;align-items:center;margin:6px 0}
+dialog .err{color:#ff8a80;min-height:16px}
+dialog .hint{color:var(--dim);font-size:11px;line-height:1.5}
+</style></head><body>
+<header>
+  <b>SC LIVE 4 emulator</b>
+  <button id="listen" title="Play Engine's audio output in this browser">Listen</button>
+  <select id="pair" title="Which output to hear"></select>
+  <button id="drivesBtn">Drives</button>
+  <button id="rebootBtn" title="Restart the whole emulated deck">Reboot</button>
+  <a href="__CONSOLE__" target="_blank">EngineX console</a>
+  <span id="st">connecting</span>
+</header>
+<div id="stage"><div id="panel"></div></div>
+
+<dialog id="drives">
+  <h3>Drives</h3>
+  <div class="hint">A folder on this PC shows up on the deck as a USB drive or the SD card. Use Linux paths:
+    your Windows <code>C:\Users\you\Music</code> is <code>/mnt/c/Users/you/Music</code>.
+    Engine writes its <i>Engine Library</i> folder into it, like on a real drive.</div>
+  <table id="dlist"></table>
+  <div class="row"><input id="dfolder" placeholder="/mnt/c/Users/you/Music" style="flex:1">
+    <select id="dkind"><option value="usb">USB drive</option><option value="sd">SD card</option></select>
+    <input id="dlabel" placeholder="Label" size="10"></div>
+  <div class="err" id="derr"></div>
+  <div class="row" style="justify-content:flex-end"><button id="dadd">Plug in</button><button id="dclose">Close</button></div>
+</dialog>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const panel=$("#panel"),st=$("#st");
+let P=null,ctl={},values={},leds={},views={};
+const post=(u,b)=>fetch(u,{method:"POST",body:b}).catch(()=>{});
+
+// ---------------------------------------------------------------- events to the server
+let q=[],busy=false;
+function send(line){q.push(line);if(!busy)flush()}
+async function flush(){busy=true;while(q.length){const b=q.splice(0).join("\n");await post("/control",b)}busy=false}
+
+// ---------------------------------------------------------------- layout scaling
+function fit(){const s=$("#stage"),k=Math.min(s.clientWidth/P.w,s.clientHeight/P.h)*0.985;
+  panel.style.transform=`scale(${k})`;panel.style.position="absolute";
+  panel.style.left=((s.clientWidth-P.w*k)/2)+"px";panel.style.top=((s.clientHeight-P.h*k)/2)+"px";panel._k=k}
+addEventListener("resize",()=>P&&fit());
+
+function el(c,cls){const d=document.createElement("div");d.className="c "+(cls||"");
+  Object.assign(d.style,{left:c.x+"px",top:c.y+"px",width:c.w+"px",height:c.h+"px"});panel.appendChild(d);return d}
+function label(d,text,below=true){if(!text)return;const l=document.createElement("div");l.className="lab"+(below?" below":"");l.textContent=text;d.appendChild(l)}
+function drag(d,onMove,onDown,onUp){d.addEventListener("pointerdown",e=>{e.preventDefault();d.setPointerCapture(e.pointerId);
+  let last={x:e.clientX,y:e.clientY};onDown&&onDown(e);
+  const mv=e2=>{onMove(e2,(e2.clientX-last.x)/panel._k,(e2.clientY-last.y)/panel._k);last={x:e2.clientX,y:e2.clientY}};
+  const up=e2=>{d.removeEventListener("pointermove",mv);d.removeEventListener("pointerup",up);d.removeEventListener("pointercancel",up);onUp&&onUp(e2)};
+  d.addEventListener("pointermove",mv);d.addEventListener("pointerup",up);d.addEventListener("pointercancel",up)})}
+const arcSvg=()=>'<svg viewBox="-60 -60 120 120"><path d="" fill="none" stroke="#4aa3ff" stroke-width="7" stroke-linecap="round"/></svg>';
+function arcPath(f,center){const a0=-135,a=a0+270*f,c=center?0:-135;const s=Math.min(a,c),e=Math.max(a,c);
+  if(e-s<.5)return"";const r=56,p=t=>[Math.sin(t*Math.PI/180)*r,-Math.cos(t*Math.PI/180)*r];
+  const[x1,y1]=p(s),[x2,y2]=p(e);return`M${x1} ${y1}A${r} ${r} 0 ${e-s>180?1:0} 1 ${x2} ${y2}`}
+
+// ---------------------------------------------------------------- controls
+const builders={
+ screen(c){const d=el(c,"screen");const cv=document.createElement("canvas");cv.width=1280;cv.height=800;d.appendChild(cv);screen(cv)},
+ panel(c){el(c,"mixbg")},
+ label(c){const d=el(c,"text"+(c.big?" big":""));d.textContent=c.lab},
+ btn(c){const d=el(c,"btn"+(c.round?" round":"")+(c.small?" small":"")+(c.big?" big":""));d.textContent=c.lab;
+  if(c.big||c.round){}
+  d.addEventListener("pointerdown",e=>{e.preventDefault();d.setPointerCapture(e.pointerId);d.classList.add("down");send(c.id+" press")});
+  const up=()=>{if(d.classList.contains("down")){d.classList.remove("down");send(c.id+" release")}};
+  d.addEventListener("pointerup",up);d.addEventListener("pointercancel",up);
+  views[c.id]={led(v){const col=c.col||"#f0f2f5";if(!v){d.style.background="";d.style.color="";d.style.boxShadow="";return}
+    const a=v>=64?1:.45;d.style.background=mix(col,a);d.style.color=a>.6?"#111":"#fff";d.style.boxShadow=`0 0 ${10*a}px ${col}`}}},
+ pad(c){const d=el(c,"pad");d.textContent=c.lab;
+  d.addEventListener("pointerdown",e=>{e.preventDefault();d.setPointerCapture(e.pointerId);d.classList.add("down");send(c.id+" press")});
+  const up=()=>{if(d.classList.contains("down")){d.classList.remove("down");send(c.id+" release")}};
+  d.addEventListener("pointerup",up);d.addEventListener("pointercancel",up);
+  views[c.id]={led(v){if(!v){d.style.background="";d.style.boxShadow="";return}
+    const r=(v>>4)&3,g=(v>>2)&3,b=v&3,col=`rgb(${r*85},${g*85},${b*85})`;
+    d.style.background=col;d.style.boxShadow=`0 0 14px ${col},inset 0 0 0 1px #ffffff40`}}},
+ knob(c){const d=el(c,"knob");d.innerHTML=arcSvg()+'<div class="ptr"></div>';label(d,c.lab);
+  const ptr=d.querySelector(".ptr"),arc=d.querySelector("path"),center=(c.d===64);
+  const show=v=>{const f=v/127;ptr.style.transform=`rotate(${-135+270*f}deg)`;arc.setAttribute("d",arcPath(f,center))};
+  let v=values[c.id]??c.d??0;show(v);
+  const set=nv=>{nv=Math.max(0,Math.min(127,Math.round(nv)));if(nv!==v){v=nv;show(v);send(`${c.id} set ${v}`)}};
+  drag(d,(e,dx,dy)=>set(v-dy*0.7+dx*0.2));
+  d.addEventListener("wheel",e=>{e.preventDefault();set(v+(e.deltaY<0?3:-3))},{passive:false});
+  d.addEventListener("dblclick",()=>set(c.d??0));
+  views[c.id]={value(nv){v=nv;show(v)}}},
+ enc(c){const d=el(c,"enc");d.innerHTML='<div class="cap"></div>';label(d,c.lab);const cap=d.querySelector(".cap");
+  let acc=0,rot=0;const turn=n=>{rot+=n*15;d.style.backgroundImage=`repeating-conic-gradient(from ${rot}deg,#3d4146 0 6deg,#2e3135 6deg 12deg)`;send(`${c.id} turn ${n}`)};
+  drag(d,(e,dx,dy)=>{acc+=(-dy+dx)/7;const n=Math.trunc(acc);if(n){acc-=n;turn(n)}});
+  d.addEventListener("wheel",e=>{e.preventDefault();turn(e.deltaY<0?1:-1)},{passive:false});
+  cap.addEventListener("pointerdown",e=>{e.stopPropagation();e.preventDefault();cap.setPointerCapture(e.pointerId);cap.classList.add("down");send(c.id+" press")});
+  const up=()=>{if(cap.classList.contains("down")){cap.classList.remove("down");send(c.id+" release")}};
+  cap.addEventListener("pointerup",up);cap.addEventListener("pointercancel",up);
+  views[c.id]={led(v){cap.style.boxShadow=v?"0 0 10px #4aa3ff,inset 0 0 0 2px #4aa3ff":""}}},
+ fader(c){vfader(c,127,true)},
+ pitch(c){vfader(c,16383,false)},
+ xfader(c){const d=el(c);const tr=document.createElement("div");tr.className="track";Object.assign(tr.style,{left:"0",right:"0",top:(c.h/2-3)+"px",height:"6px"});d.appendChild(tr);
+  const cap=document.createElement("div");cap.className="cap2 xcap";Object.assign(cap.style,{width:"26px",top:"0",height:c.h+"px"});d.appendChild(cap);
+  let v=values[c.id]??c.d??64;const show=()=>cap.style.left=(v/127*(c.w-26))+"px";show();
+  const set=nv=>{nv=Math.max(0,Math.min(127,Math.round(nv)));if(nv!==v){v=nv;show();send(`${c.id} set ${v}`)}};
+  drag(d,(e,dx)=>set(v+dx*127/(c.w-26)));d.addEventListener("dblclick",()=>set(64));
+  views[c.id]={value(nv){v=nv;show()}}},
+ jog(c){const d=el(c,"jog");d.innerHTML='<div class="top"></div><div class="mark"></div><div class="info"><span>'+c.lab+'</span></div>';
+  const mark=d.querySelector(".mark"),TPR=2048;let pos=0,touching=false;
+  const show=()=>mark.style.transform=`rotate(${pos/TPR*360}deg)`;
+  const ang=e=>{const r=d.getBoundingClientRect();return Math.atan2(e.clientY-(r.top+r.height/2),e.clientX-(r.left+r.width/2))};
+  let a0=0,acc=0;
+  drag(d,e=>{const a=ang(e);let da=a-a0;if(da>Math.PI)da-=2*Math.PI;if(da<-Math.PI)da+=2*Math.PI;a0=a;
+      acc+=da/(2*Math.PI)*TPR;const n=Math.trunc(acc);if(n){acc-=n;pos+=n;show();send(`${c.id} spin ${n}`)}},
+    e=>{a0=ang(e);const r=d.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2);
+      touching=Math.hypot(dx,dy)<r.width*0.34;if(touching){d.classList.add("touched");send(c.id+" press")}},
+    ()=>{if(touching){touching=false;d.classList.remove("touched");send(c.id+" release")}});
+  d.addEventListener("wheel",e=>{e.preventDefault();const n=e.deltaY<0?24:-24;pos+=n;show();send(`${c.id} spin ${n}`)},{passive:false});
+  views[c.id]={}},
+ sw(c){const d=el(c,"sw");label(d,c.labs?"":c.lab);
+  const parts=c.labs.map((t,i)=>{const p=document.createElement("div");p.textContent=t;p.onclick=()=>{set(i)};d.appendChild(p);return p});
+  let v=values[c.id]??c.d??0;const show=()=>parts.forEach((p,i)=>p.classList.toggle("on",i===v));show();
+  const set=i=>{v=i;show();send(`${c.id} set ${i}`)};
+  if(c.lab&&c.lab!==c.labs[1]){const l=document.createElement("div");l.className="lab below";l.textContent=c.lab;d.appendChild(l)}
+  views[c.id]={value(nv){v=nv;show()}}},
+ sel(c){const d=el(c,"sel");d.innerHTML='<div class="ptr"></div>';label(d,c.lab);const ptr=d.querySelector(".ptr");
+  const n=c.vals.length,angs=c.labs.map((_,i)=>-60+120*i/(n-1));
+  const opts=c.labs.map((t,i)=>{const o=document.createElement("div");o.className="opt";o.textContent=t;const a=angs[i]*Math.PI/180,R=c.w/2+11;
+    o.style.left=(c.w/2+Math.sin(a)*R)+"px";o.style.top=(c.h/2-Math.cos(a)*R)+"px";d.appendChild(o);return o});
+  let v=values[c.id]??c.d??0;const show=()=>{ptr.style.transform=`rotate(${angs[v]}deg)`;opts.forEach((o,i)=>o.classList.toggle("on",i===v))};show();
+  const set=i=>{v=(i+n)%n;show();send(`${c.id} set ${v}`)};
+  d.addEventListener("click",e=>set(e.shiftKey?v-1:v+1));d.addEventListener("wheel",e=>{e.preventDefault();set(v+(e.deltaY<0?1:-1))},{passive:false});
+  views[c.id]={value(nv){v=nv;show()}}},
+ vu(c){const d=el(c,"vu");const segs=[];for(let i=0;i<6;i++){const s=document.createElement("i");d.appendChild(s);segs.push(s)}
+  const cols=["#2bd46a","#2bd46a","#2bd46a","#2bd46a","#ffb02e","#ff4b3e"];
+  views[c.id]={cc(v){let n=0;for(let b=v;b;b>>=1)n+=b&1;segs.forEach((s,i)=>s.style.background=i<n?cols[i]:"")}}},
+};
+function vfader(c,max,topIsMax){const d=el(c);const tr=document.createElement("div");tr.className="track";Object.assign(tr.style,{top:"0",bottom:"0",left:(c.w/2-3)+"px",width:"6px"});d.appendChild(tr);
+  if(!topIsMax){const m=document.createElement("div");Object.assign(m.style,{position:"absolute",left:"-6px",right:"-6px",top:(c.h/2-1)+"px",height:"2px",background:"#555"});d.appendChild(m);
+    const led=document.createElement("div");Object.assign(led.style,{position:"absolute",left:"-12px",top:(c.h/2-4)+"px",width:"8px",height:"8px",borderRadius:"50%",background:"#222"});d.appendChild(led);
+    views[c.id+"#led"]=led}
+  const capH=22,cap=document.createElement("div");cap.className="cap2";Object.assign(cap.style,{left:"-4px",right:"-4px",height:capH+"px"});d.appendChild(cap);label(d,c.lab);
+  let v=values[c.id]??(topIsMax?c.d??0:8192);const span=c.h-capH;
+  const show=()=>cap.style.top=((topIsMax?1-v/max:v/max)*span)+"px";show();
+  const set=nv=>{nv=Math.max(0,Math.min(max,Math.round(nv)));if(nv!==v){v=nv;show();send(`${c.id} set ${v}`)}};
+  drag(d,(e,dx,dy)=>set(v+(topIsMax?-1:1)*dy*max/span));
+  d.addEventListener("dblclick",()=>set(topIsMax?(c.d??0):8192));
+  d.addEventListener("wheel",e=>{e.preventDefault();set(v+(e.deltaY<0?1:-1)*(topIsMax?-1:1)*-max/64)},{passive:false});
+  views[c.id]=Object.assign(views[c.id]||{},{value(nv){v=nv;show()}})}
+function mix(hex,a){const n=parseInt(hex.slice(1),16),r=n>>16,g=(n>>8)&255,b=n&255,k=x=>Math.round(0x3a+(x-0x3a)*a);return`rgb(${k(r)},${k(g)},${k(b)})`}
+
+// ---------------------------------------------------------------- LEDs and values from the server
+function applyLeds(){
+  for(const c of P.controls){if(!c.id)continue;const v=views[c.id];if(!v)continue;
+    if(v.led){const key=c.t==="enc"?`n${c.ch}.${c.push}`:`n${c.ch}.${c.n}`;v.led(leds[key]||0)}
+    if(v.cc)v.cc(leds[`c${c.ch}.${c.cc}`]||0);
+    if(c.t==="pitch"&&views[c.id+"#led"]){views[c.id+"#led"].style.background=leds[`n${c.ch}.${c.led}`]?"#ff4b3e":"#222"}}}
+async function stateLoop(){let seq=-1,first=true;
+  for(;;){try{const r=await fetch("/state?since="+seq,{cache:"no-store"});const s=await r.json();
+      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}applyLeds()}}
+    catch(e){await new Promise(r=>setTimeout(r,1000))}}}
+
+// ---------------------------------------------------------------- screen
+function screen(cv){const g=cv.getContext("2d");let seq=0,img=null,frames=0,t0=performance.now();
+  (async()=>{for(;;){try{const r=await fetch("/frame?since="+seq,{cache:"no-store"});if(r.status===204)continue;
+      const b=await r.arrayBuffer(),h=new DataView(b);seq=h.getUint32(0,true);const w=h.getUint32(4,true),hh=h.getUint32(8,true),bpl=h.getUint32(12,true);
+      if(cv.width!==w||cv.height!==hh){cv.width=w;cv.height=hh;img=null}if(!img)img=g.createImageData(w,hh);
+      const src=new Uint8Array(b,16),dst=img.data;
+      for(let y=0;y<hh;y++){let s=y*bpl,d=y*w*4;for(let x=0;x<w;x++,s+=4,d+=4){dst[d]=src[s+2];dst[d+1]=src[s+1];dst[d+2]=src[s];dst[d+3]=255}}
+      g.putImageData(img,0,0);frames++;const t=performance.now();if(t-t0>1000){st.textContent=(frames*1000/(t-t0)).toFixed(1)+" fps";frames=0;t0=t}}
+    catch(e){st.textContent="waiting for Engine";await new Promise(r=>setTimeout(r,1000))}}})();
+  const pos=e=>{const r=cv.getBoundingClientRect();return[Math.round((e.clientX-r.left)*cv.width/r.width),Math.round((e.clientY-r.top)*cv.height/r.height)]};
+  let down=false,tq=[],tb=false;const ts=l=>{tq.push(l);if(!tb)tf()};
+  const tf=async()=>{tb=true;while(tq.length){await post("/input",tq.splice(0).join("\n")+"\n")}tb=false};
+  cv.addEventListener("pointerdown",e=>{e.preventDefault();cv.setPointerCapture(e.pointerId);down=true;const[x,y]=pos(e);ts(`down ${x} ${y}`)});
+  cv.addEventListener("pointermove",e=>{if(!down)return;const[x,y]=pos(e);ts(`move ${x} ${y}`)});
+  cv.addEventListener("pointerup",e=>{if(!down)return;down=false;const[x,y]=pos(e);ts(`up ${x} ${y}`)});
+  cv.addEventListener("wheel",e=>{e.preventDefault();const[x,y]=pos(e);ts(`wheel ${x} ${y} ${e.deltaY<0?120:-120}`)},{passive:false})}
+
+// ---------------------------------------------------------------- audio
+let actx=null,playing=false;
+async function audioLoop(){let pos=0,next=0;
+  while(playing){try{const r=await fetch("/audio?pos="+pos,{cache:"no-store"});const b=await r.arrayBuffer();const h=new DataView(b);
+      const np=Number(h.getBigUint64(0,true)),rate=h.getUint32(8,true),n=(b.byteLength-12)/4;
+      if(!rate||!n){await new Promise(r=>setTimeout(r,200));continue}
+      pos=np;if(!actx||actx.sampleRate!==rate){actx&&actx.close();actx=new AudioContext({sampleRate:rate});next=0}
+      const s=new Int16Array(b,12,n*2),buf=actx.createBuffer(2,n,rate),L=buf.getChannelData(0),R=buf.getChannelData(1);
+      for(let i=0;i<n;i++){L[i]=s[2*i]/32768;R[i]=s[2*i+1]/32768}
+      const now=actx.currentTime;if(next<now+0.03||next>now+0.6)next=now+0.12;
+      const src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);src.start(next);next+=n/rate}
+    catch(e){await new Promise(r=>setTimeout(r,500))}}}
+$("#listen").onclick=()=>{playing=!playing;$("#listen").classList.toggle("on",playing);$("#listen").textContent=playing?"Listening":"Listen";
+  if(playing)audioLoop();else if(actx){actx.close();actx=null}};
+const PAIRS={"hw:1":["Main","Booth","Phones","Out 7/8"]};
+async function loadPairs(){try{const r=await(await fetch("/audio-devices")).json();const s=$("#pair");s.innerHTML="";
+    for(const d of r.devices)for(let p=0;p+1<d.channels;p+=2){const o=document.createElement("option");o.value=`${d.index} ${p} ${p+1}`;
+      o.textContent=`${(PAIRS[d.name]||[])[p/2]||"Out "+(p+1)+"/"+(p+2)} (${d.name} ${p+1}/${p+2})`;s.appendChild(o)}
+    if(r.select)s.value=r.select.join(" ")}catch(e){}}
+$("#pair").onchange=e=>post("/audio-select",e.target.value);
+
+// ---------------------------------------------------------------- drives, reboot
+async function drivesShow(list){list=list||await(await fetch("/drives")).json();const t=$("#dlist");t.innerHTML="";
+  if(!list.length)t.innerHTML='<tr><td class="hint">Nothing plugged in.</td></tr>';
+  for(const d of list){const tr=document.createElement("tr");tr.innerHTML=`<td><b></b></td><td></td><td></td><td></td>`;
+    tr.children[0].firstChild.textContent=d.label;tr.children[1].textContent=d.kind==="sd"?"SD card":"USB drive";tr.children[2].textContent=d.folder+(d.ok?"":" (missing)");
+    const b=document.createElement("button");b.textContent="Eject";b.onclick=async()=>{const r=await fetch("/drives",{method:"POST",body:JSON.stringify({action:"remove",label:d.label})});drivesShow((await r.json()).drives)};
+    tr.children[3].appendChild(b);t.appendChild(tr)}}
+$("#drivesBtn").onclick=()=>{$("#derr").textContent="";drivesShow();$("#drives").showModal()};
+$("#dclose").onclick=()=>$("#drives").close();
+$("#dadd").onclick=async()=>{const r=await fetch("/drives",{method:"POST",body:JSON.stringify({folder:$("#dfolder").value.trim(),kind:$("#dkind").value,label:$("#dlabel").value.trim()})});
+  const j=await r.json();$("#derr").textContent=j.error||"";if(!j.error){$("#dfolder").value="";$("#dlabel").value=""}drivesShow(j.drives)};
+$("#rebootBtn").onclick=async()=>{if(!confirm("Reboot the emulated deck? Engine takes a minute or two to come back."))return;
+  await post("/reboot","");st.textContent="rebooting...";setTimeout(()=>location.reload(),15000)};
+
+// ---------------------------------------------------------------- start
+(async()=>{P=await(await fetch("/panel.json")).json();
+  try{values=(await(await fetch("/state?since=-2")).json()).values}catch(e){}
+  for(const c of P.controls)(builders[c.t]||(()=>{}))(c);
+  fit();stateLoop();loadPairs();setInterval(loadPairs,10000)})();
+</script></body></html>

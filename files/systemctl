@@ -1,0 +1,17 @@
+#!/bin/sh
+# Emulator stand-in for systemctl. Only engine.service means anything here:
+# restart/stop/start it by signalling the Engine loop in emu.sh. Everything else succeeds quietly.
+args=""
+for a in "$@"; do case "$a" in -*) ;; *) args="$args $a" ;; esac; done
+set -- $args
+verb=${1:-}; unit=${2:-}
+case "$unit" in engine|engine.service) ;; *) [ "$verb" = is-active ] && { echo active; exit 0; }; exit 0 ;; esac
+case "$verb" in
+    restart|stop|kill|try-restart|reload-or-restart)
+        echo "$verb" > /tmp/emu/engine-ctl
+        pkill -f '/usr/Engine/Engine -d0' 2>/dev/null
+        exit 0 ;;
+    start) echo start > /tmp/emu/engine-ctl; exit 0 ;;
+    is-active) pgrep -f '/usr/Engine/Engine -d0' >/dev/null && { echo active; exit 0; }; echo inactive; exit 3 ;;
+esac
+exit 0
