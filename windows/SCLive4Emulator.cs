@@ -217,7 +217,7 @@ namespace SCLive4Emulator
         bool busy, polling;
 
         // controls
-        Control setupBar;
+        Control setupBar, setupGap;
         Label setupText;
         Button setupButton;
         ComboBox profileBox;
@@ -354,19 +354,15 @@ namespace SCLive4Emulator
 
         void Build()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16), BackColor = Bg };
-            // Without this the single column sizes to its widest child and runs off the right edge.
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // setup bar
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // header
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // buttons
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // files above, activity log below
+            // Plain docking: the bars stack at the top and the files/log area fills the rest. (A
+            // TableLayoutPanel with a percent row left that area at its default height on Windows.)
+            var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16), BackColor = Bg };
             Controls.Add(root);
 
             // setup bar (shown when WSL or the emulator is missing)
             var bar = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1,
+                Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1,
                 BackColor = Color.FromArgb(70, 52, 20), Visible = false, Margin = new Padding(0, 0, 0, 12), Padding = new Padding(12, 10, 12, 10),
             };
             bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -378,7 +374,7 @@ namespace SCLive4Emulator
             bar.Controls.Add(setupText, 0, 0);
             bar.Controls.Add(setupButton, 1, 0);
             setupBar = bar;
-            root.Controls.Add(setupBar);
+            setupGap = new Panel { Dock = DockStyle.Top, Height = 12, Visible = false, BackColor = Bg };
 
             // header: title, deck picker, status
             var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
@@ -390,7 +386,7 @@ namespace SCLive4Emulator
             newDeck.MinimumSize = new Size(0, 30); newDeck.Margin = new Padding(0, 3, 18, 0);
             statusLabel = new Label { AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 9, 0, 0), Text = "Checking WSL..." };
             header.Controls.AddRange(new Control[] { title, deckLabel, profileBox, newDeck, statusLabel });
-            root.Controls.Add(header);
+            header.Padding = new Padding(0, 0, 0, 10);
 
             // action buttons
             var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Margin = new Padding(0, 0, 0, 12) };
@@ -401,7 +397,7 @@ namespace SCLive4Emulator
             consoleButton = MakeButton("EngineX console", (s, e) => OpenUrl(Get("console_url", "http://localhost:8080/")));
             var more = MakeButton("More...", (s, e) => ShowMoreMenu((Control)s));
             actions.Controls.AddRange(new Control[] { startButton, stopButton, rebootButton, deckButton, consoleButton, more });
-            root.Controls.Add(actions);
+            actions.Padding = new Padding(0, 0, 0, 12);
 
             // drop zone (left) + drives (right)
             // Drop zone + drives on top, activity log underneath, with a divider you can drag.
@@ -459,7 +455,11 @@ namespace SCLive4Emulator
             drivesPanel.Controls.Add(driveButtons);
             split.Controls.Add(drivesPanel, 1, 0);
             body.Panel1.Controls.Add(split);
-            root.Controls.Add(body);
+            root.Controls.Add(body);      // Fill: takes what's left after the bars below
+            root.Controls.Add(actions);
+            root.Controls.Add(header);
+            root.Controls.Add(setupGap);
+            root.Controls.Add(setupBar);  // added last, so it docks first and sits at the very top
 
             var logPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
             logPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -612,7 +612,7 @@ namespace SCLive4Emulator
             wsl.EmuDir = found.Split('\n')[0].Trim();
             settings["EmuDir"] = wsl.EmuDir;
             Settings.Save(settings);
-            setupBar.Visible = false;
+            setupBar.Visible = setupGap.Visible = false;
             ActionsEnabled(true);
             Log("Emulator: " + wsl.EmuDir + " in WSL " + wsl.Distro);
             await LoadProfiles();
@@ -630,7 +630,7 @@ namespace SCLive4Emulator
         {
             setupText.Text = text;
             setupButton.Text = button;
-            setupBar.Visible = true;
+            setupBar.Visible = setupGap.Visible = true;
         }
 
         async Task SetupAction()
