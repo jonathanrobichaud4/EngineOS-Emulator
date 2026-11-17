@@ -108,27 +108,44 @@ namespace SCLive4Emulator
 
         public static List<string> ListDistros()
         {
+            // wsl.exe -l -q prints UTF-16 on most systems but UTF-8 when WSL_UTF8 is set or on some
+            // versions, so read raw bytes and pick the encoding from what's there.
             var list = new List<string>();
             if (!Installed) return list;
             try
             {
                 var p = new Process();
-                p.StartInfo = new ProcessStartInfo(WslExe, "-l -q")
-                {
-                    UseShellExecute = false, CreateNoWindow = true,
-                    RedirectStandardOutput = true, StandardOutputEncoding = Encoding.Unicode,
-                };
+                p.StartInfo = new ProcessStartInfo(WslExe, "-l -q") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
                 p.Start();
-                string all = p.StandardOutput.ReadToEnd();
+                var ms = new MemoryStream();
+                p.StandardOutput.BaseStream.CopyTo(ms);
                 p.WaitForExit(15000);
+                byte[] b = ms.ToArray();
+                int zeros = b.Count(x => x == 0);
+                string all = zeros > b.Length / 4 ? Encoding.Unicode.GetString(b) : Encoding.UTF8.GetString(b);
                 foreach (var l in all.Split('\n'))
                 {
-                    string t = l.Replace("\0", "").Trim();
+                    string t = new string(l.Where(c => c != '\0' && c != '\uFEFF' && !char.IsControl(c)).ToArray()).Trim();
                     if (t.Length > 0 && !t.StartsWith("docker-desktop")) list.Add(t);
                 }
             }
             catch { }
             return list;
+        }
+
+        // Asks the distro for its own name from inside Linux; empty if it can't be started that way.
+        public async Task<string> Probe(string distro)
+        {
+            string keep = Distro;
+            Distro = distro;
+            string name = (await Capture("echo \"ok:$WSL_DISTRO_NAME\"")).Trim();
+            Distro = keep;
+            foreach (var l in name.Split('\n'))
+            {
+                string t = l.Trim();
+                if (t.StartsWith("ok:")) return t.Substring(3).Length > 0 ? t.Substring(3) : (distro.Length > 0 ? distro : "(default)");
+            }
+            return "";
         }
 
         public Process KeepAlive()
@@ -422,15 +439,33 @@ namespace SCLive4Emulator
             var distros = Wsl.ListDistros();
             string saved;
             settings.TryGetValue("Distro", out saved);
-            if (distros.Count == 0)
+            // Try the saved one, then Ubuntu, then the rest, then WSL's default; use the first that runs.
+            var order = new List<string>();
+            if (!string.IsNullOrEmpty(saved)) order.Add(saved);
+            order.AddRange(distros.Where(d => d.StartsWith("Ubuntu", StringComparison.OrdinalIgnoreCase)));
+            order.AddRange(distros);
+            order.Add("");
+            string chosen = null;
+            foreach (var d in order.Distinct())
             {
-                ShowSetup("WSL has no Linux installed yet. Ubuntu is what the emulator is tested on.", "Install Ubuntu");
+                statusLabel.Text = "Checking WSL " + (d.Length > 0 ? d : "default") + "...";
+                string name = await wsl.Probe(d);
+                if (name.Length == 0) continue;
+                if (name.StartsWith("docker-desktop")) continue;
+                chosen = name == "(default)" ? "" : name;
+                break;
+            }
+            if (chosen == null)
+            {
+                ShowSetup("WSL has no Linux installed that can be started. Ubuntu is what the emulator is tested on.", "Install Ubuntu");
                 statusLabel.Text = "No Linux distro in WSL";
+                Log("WSL distros found: " + (distros.Count > 0 ? string.Join(", ", distros) : "none"));
                 return;
             }
-            wsl.Distro = (saved != null && distros.Contains(saved)) ? saved
-                       : distros.FirstOrDefault(d => d.StartsWith("Ubuntu", StringComparison.OrdinalIgnoreCase)) ?? distros[0];
+            wsl.Distro = chosen;
             settings["Distro"] = wsl.Distro;
+            Settings.Save(settings);
+            Log("Using WSL distro: " + (chosen.Length > 0 ? chosen : "(default)"));
 
             string emuDir;
             settings.TryGetValue("EmuDir", out emuDir);
