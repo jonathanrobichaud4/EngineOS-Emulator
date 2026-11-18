@@ -48,6 +48,83 @@ namespace EngineOSEmulator
         }
     }
 
+    // Dark-mode touches Windows doesn't give WinForms by itself: a dark title bar (Windows 10 2004
+    // and later), dark scrollbars and dropdowns, and list headers drawn in the app's colors.
+    static class Theme
+    {
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+
+        public static readonly Color Header = Color.FromArgb(44, 48, 53);
+        public static readonly Color Accent = Color.FromArgb(46, 160, 98);
+
+        public static void DarkTitleBar(Form f)
+        {
+            f.HandleCreated += (s, e) =>
+            {
+                try
+                {
+                    int on = 1;
+                    // 20 on current Windows, 19 on early Windows 10 builds.
+                    if (DwmSetWindowAttribute(f.Handle, 20, ref on, 4) != 0) DwmSetWindowAttribute(f.Handle, 19, ref on, 4);
+                }
+                catch { }
+            };
+        }
+
+        // Dark scrollbars (and the dropdown list of a ComboBox).
+        public static void DarkScroll(Control c)
+        {
+            c.HandleCreated += (s, e) =>
+            {
+                try { SetWindowTheme(c.Handle, c is ComboBox ? "DarkMode_CFD" : "DarkMode_Explorer", null); } catch { }
+            };
+        }
+
+        // A ListView with a header in the app's colors, and its last column stretched to the edge
+        // so there's no strip of system-coloured header beside it.
+        public static void DarkList(ListView l, Color fg, Color dim)
+        {
+            DarkScroll(l);
+            l.OwnerDraw = true;
+            l.DrawColumnHeader += (s, e) =>
+            {
+                using (var b = new SolidBrush(Header)) e.Graphics.FillRectangle(b, e.Bounds);
+                using (var p = new Pen(Color.FromArgb(60, 65, 72))) e.Graphics.DrawLine(p, e.Bounds.Right - 1, e.Bounds.Top + 4, e.Bounds.Right - 1, e.Bounds.Bottom - 5);
+                var r = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 8, e.Bounds.Height);
+                TextRenderer.DrawText(e.Graphics, e.Header.Text, l.Font, r, dim, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            };
+            l.DrawItem += (s, e) => { e.DrawDefault = true; };
+            l.DrawSubItem += (s, e) => { e.DrawDefault = true; };
+            EventHandler fit = (s, e) =>
+            {
+                if (l.Columns.Count == 0) return;
+                int used = 0;
+                for (int i = 0; i < l.Columns.Count - 1; i++) used += l.Columns[i].Width;
+                int w = l.ClientSize.Width - used;
+                if (w > 40) l.Columns[l.Columns.Count - 1].Width = w;
+            };
+            l.SizeChanged += fit;
+            l.HandleCreated += fit;
+        }
+
+        // A dim note in the middle of an empty list.
+        public static Label EmptyNote(ListView l, string text, Color dim)
+        {
+            // Below the header row, which is part of the list's own area.
+            var n = new Label { Text = text, ForeColor = dim, BackColor = l.BackColor, AutoSize = false, TextAlign = ContentAlignment.MiddleCenter };
+            EventHandler place = (s, e) =>
+            {
+                int top = l.Font.Height + 12;
+                n.Bounds = new Rectangle(0, top, l.ClientSize.Width, Math.Max(0, l.ClientSize.Height - top));
+            };
+            l.SizeChanged += place;
+            l.Controls.Add(n);
+            place(null, null);
+            return n;
+        }
+    }
+
     // The deck models the emulator knows, by inMusic product code. Only the SC LIVE 4 boots so far.
     static class DeckModels
     {
@@ -275,6 +352,15 @@ namespace EngineOSEmulator
         Label setupText;
         Button setupButton;
         ComboBox profileBox;
+        Label statusDot, drivesEmpty;
+
+        // The dot beside the status: green running, amber busy or starting, grey otherwise.
+        void SetDot(string state)
+        {
+            statusDot.ForeColor = state == "running" ? Theme.Accent
+                                : state == "busy" || state == "starting" ? Color.FromArgb(230, 170, 60)
+                                : state == "error" ? Color.FromArgb(220, 80, 70) : Dim;
+        }
         Label statusLabel;
         Button startButton, stopButton, rebootButton, deckButton, consoleButton;
         Panel dropZone;
@@ -295,8 +381,9 @@ namespace EngineOSEmulator
             SuspendLayout();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
-            Text = AppInfo.Name;
+            Text = AppInfo.Name + (BuildInfo.Version == "dev" ? " (test build)" : " " + BuildInfo.Version);
             Font = new Font("Segoe UI", 9.5f);
+            Theme.DarkTitleBar(this);
             ClientSize = new Size(980, 720);
             MinimumSize = new Size(820, 600);
             BackColor = Bg;
@@ -402,7 +489,9 @@ namespace EngineOSEmulator
                 ForeColor = Fg, Margin = new Padding(0, 0, 8, 0), Cursor = Cursors.Hand,
             };
             b.FlatAppearance.BorderColor = Color.FromArgb(70, 75, 82);
-            b.Click += click;
+            b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(40, 132, 84) : Color.FromArgb(60, 65, 72);
+            b.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(26, 92, 58) : Color.FromArgb(40, 44, 49);
+            if (click != null) b.Click += click;
             return b;
         }
 
@@ -438,8 +527,10 @@ namespace EngineOSEmulator
             profileBox.SelectedIndexChanged += async (s, e) => { settings["Profile"] = CurrentProfile; Settings.Save(settings); await RefreshAll(); };
             var newDeck = MakeButton("Decks...", async (s, e) => await ManageDecks());
             newDeck.MinimumSize = new Size(0, 30); newDeck.Margin = new Padding(0, 3, 18, 0);
+            statusDot = new Label { AutoSize = true, Text = "\u25CF", ForeColor = Dim, Font = new Font("Segoe UI", 11f), Margin = new Padding(0, 6, 2, 0) };
             statusLabel = new Label { AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 9, 0, 0), Text = "Checking WSL..." };
-            header.Controls.AddRange(new Control[] { title, deckLabel, profileBox, newDeck, statusLabel });
+            Theme.DarkScroll(profileBox);
+            header.Controls.AddRange(new Control[] { title, deckLabel, profileBox, newDeck, statusDot, statusLabel });
             header.Padding = new Padding(0, 0, 0, 10);
 
             // action buttons
@@ -467,9 +558,12 @@ namespace EngineOSEmulator
             dropZone = new Panel { Dock = DockStyle.Fill, BackColor = Panel1, Margin = new Padding(0, 0, 10, 0), AllowDrop = true, Cursor = Cursors.Hand };
             dropZone.Paint += (s, e) =>
             {
-                using (var pen = new Pen(Color.FromArgb(80, 86, 94), 2) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
+                using (var pen = new Pen(dragging ? Theme.Accent : Color.FromArgb(80, 86, 94), 2) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
                     e.Graphics.DrawRectangle(pen, 6, 6, dropZone.Width - 13, dropZone.Height - 13);
             };
+            // Lights up while files are dragged over it.
+            EventHandler unlit = (s, e) => SetDragging(false);
+            DragLeave += unlit; dropZone.DragLeave += unlit;
             dropZone.DragEnter += OnDragEnter;
             dropZone.DragDrop += OnDragDrop;
             dropZone.Click += (s, e) => BrowseFiles();
@@ -494,11 +588,13 @@ namespace EngineOSEmulator
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             drivesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            drivesPanel.Controls.Add(new Label { Text = "Drives plugged into this deck", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 0, 0, 4) });
+            drivesPanel.Controls.Add(new Label { Text = "Drives plugged into this deck", AutoSize = true, ForeColor = Dim, Font = new Font("Segoe UI Semibold", 9.5f), Margin = new Padding(0, 0, 0, 4) });
             drivesList = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.None };
             drivesList.Columns.Add("Label", S(100));
             drivesList.Columns.Add("Type", S(80));
             drivesList.Columns.Add("Folder", S(260));
+            Theme.DarkList(drivesList, Fg, Dim);
+            drivesEmpty = Theme.EmptyNote(drivesList, "No drives plugged in.\nDrop a folder on the left, or use Add USB folder.", Dim);
             drivesPanel.Controls.Add(drivesList);
             var driveButtons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, 6, 0, 0) };
             var addUsb = MakeButton("Add USB folder", async (s, e) => await PickDrive(false));
@@ -519,13 +615,14 @@ namespace EngineOSEmulator
             logPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             logPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             logPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            logPanel.Controls.Add(new Label { Text = "Activity", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 0, 0, 4) });
+            logPanel.Controls.Add(new Label { Text = "Activity", AutoSize = true, ForeColor = Dim, Font = new Font("Segoe UI Semibold", 9.5f), Margin = new Padding(0, 0, 0, 4) });
             logBox = new TextBox
             {
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true,
                 BackColor = Color.FromArgb(16, 17, 19), ForeColor = Color.FromArgb(190, 196, 204), BorderStyle = BorderStyle.None,
                 Font = new Font("Consolas", 9f),
             };
+            Theme.DarkScroll(logBox);
             logPanel.Controls.Add(logBox);
             body.Panel2.Controls.Add(logPanel);
 
@@ -558,7 +655,7 @@ namespace EngineOSEmulator
         {
             busy = b;
             foreach (var c in new Control[] { startButton, stopButton, rebootButton, profileBox, setupButton }) c.Enabled = !b;
-            if (b && what != null) statusLabel.Text = what + "...";
+            if (b && what != null) { statusLabel.Text = what + "..."; SetDot("busy"); }
             UseWaitCursor = b;
         }
 
@@ -793,7 +890,11 @@ namespace EngineOSEmulator
                 string sys = !setup ? "not set up: drop the firmware .img or updater here"
                            : Get("enginex", "").Length > 0 ? "EngineX " + Get("enginex", "") : "stock Engine OS";
                 string state = !running ? "stopped" : Get("engine", "down") == "up" ? "running" : "starting";
-                if (!busy) statusLabel.Text = sys + "  |  " + state + (running && Get("ip", "").Length > 0 ? "  |  deck " + Get("ip", "") : "");
+                if (!busy)
+                {
+                    statusLabel.Text = state + "  \u00B7  " + sys + (running && Get("ip", "").Length > 0 ? "  \u00B7  deck " + Get("ip", "") : "");
+                    SetDot(state);
+                }
                 startButton.Enabled = !busy && setup && !running;
                 stopButton.Enabled = !busy && running;
                 rebootButton.Enabled = !busy && running;
@@ -816,6 +917,7 @@ namespace EngineOSEmulator
                 var it = new ListViewItem(new[] { parts[0], parts[1] == "sd" ? "SD card" : "USB", parts[2].Trim() });
                 drivesList.Items.Add(it);
             }
+            drivesEmpty.Visible = drivesList.Items.Count == 0;
         }
 
         // ---------------------------------------------------------------- actions
@@ -849,7 +951,7 @@ namespace EngineOSEmulator
             if (wsl.EmuDir.Length == 0) return;
             // Laid out with auto-sizing panels, and the few pixel sizes scaled by hand (S), so it
             // fits at any display scaling.
-            using (var f = new Form { AutoScaleMode = AutoScaleMode.None, Text = "Decks", FormBorderStyle = FormBorderStyle.FixedDialog,
+            using (var f = new Form { AutoScaleMode = AutoScaleMode.None, Icon = Icon, Text = "Decks", FormBorderStyle = FormBorderStyle.FixedDialog,
                                       StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false,
                                       AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(S(12)),
                                       BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
@@ -862,10 +964,13 @@ namespace EngineOSEmulator
                                           HideSelection = false, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
                                           HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(0, 0, 0, S(10)) };
                 list.Columns.Add("Deck", S(160)); list.Columns.Add("Model", S(130)); list.Columns.Add("Status", S(290));
+                Theme.DarkList(list, Fg, Dim);
+                Theme.DarkTitleBar(f);
                 var modelRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 0, 0, S(12)) };
                 var modelLabel = new Label { Text = "Model:", AutoSize = true, Margin = new Padding(0, S(5), S(8), 0) };
                 var model = new ComboBox { Width = S(240), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Panel1, ForeColor = Fg, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
                 modelRow.Controls.AddRange(new Control[] { modelLabel, model });
+                Theme.DarkScroll(model);
                 for (int i = 0; i < DeckModels.Codes.Length; i++) model.Items.Add(DeckModels.Label(i));
                 var add = MakeButton("Add...", null); var ren = MakeButton("Rename...", null); var del = MakeButton("Delete...", null);
                 var use = MakeButton("Use this deck", null, true); var close = MakeButton("Close", null);
@@ -1175,13 +1280,25 @@ namespace EngineOSEmulator
         }
 
         // ---------------------------------------------------------------- drag and drop
+        bool dragging;
+        void SetDragging(bool on)
+        {
+            if (dragging == on) return;
+            dragging = on;
+            dropZone.BackColor = on ? Color.FromArgb(32, 48, 40) : Panel1;
+            dropText.BackColor = dropZone.BackColor;
+            dropZone.Invalidate();
+        }
+
         void OnDragEnter(object sender, DragEventArgs e)
         {
             e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) && !busy ? DragDropEffects.Copy : DragDropEffects.None;
+            SetDragging(e.Effect != DragDropEffects.None);
         }
 
         void OnDragDrop(object sender, DragEventArgs e)
         {
+            SetDragging(false);
             var paths = e.Data.GetData(DataFormats.FileDrop) as string[];
             if (paths == null) return;
             bool shift = (ModifierKeys & Keys.Shift) != 0;
@@ -1304,6 +1421,7 @@ namespace EngineOSEmulator
                                       MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
                                       BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
             {
+                Theme.DarkTitleBar(f);
                 float k; using (var g = f.CreateGraphics()) k = g.DpiX / 96f;
                 Func<int, int> S = px => (int)Math.Round(px * k);
                 f.SuspendLayout();
