@@ -1,0 +1,134 @@
+#!/bin/bash
+# SC LIVE 4 emulator for macOS: runs the emulator in a small Lima Linux VM (mac/lima.yaml) and
+# opens the deck in your browser. The Mac counterpart of the Windows app, as a command.
+#
+#   sclive4-emu install                      install Lima (Homebrew) and create the VM
+#   sclive4-emu setup FIRMWARE [BUNDLE]      build the deck from an SC LIVE 4 firmware file
+#   sclive4-emu start [--stock]              start the deck and open http://localhost:8090
+#   sclive4-emu stop | restart | status | log
+#   sclive4-emu open | console               open the deck page / the EngineX console
+#   sclive4-emu drive add FOLDER [--sd]      plug a folder in as a USB drive (see below)
+#   sclive4-emu update                       update the emulator (in the VM and this folder)
+#   sclive4-emu vm-stop                      stop the VM itself (frees its memory)
+#   sclive4-emu uninstall                    delete the VM and everything in it
+#   sclive4-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
+#                                            shell, info, profiles, identify, reset-data, ...)
+#
+# Files: your home folder is visible in the VM read-only, at the same path, so FIRMWARE can be
+# anywhere in it (Downloads is fine). A folder used as a drive has to be writable, because
+# Engine writes its library onto the drive: keep it in ~/SCLive4Emulator, which the VM can
+# write to. Files outside your home folder are copied into ~/SCLive4Emulator first.
+#
+# Settings: SCLIVE4_VM (VM name, default sclive4-emu).
+
+
+VM="${SCLIVE4_VM:-sclive4-emu}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+YAML="$HERE/lima.yaml"
+SHARE="$HOME/SCLive4Emulator"
+EMU=/opt/sclive4-emulator/emu.sh
+DECK_URL=http://localhost:8090/
+CONSOLE_URL=http://localhost:8080/
+
+say() { printf '%s\n' "sclive4-emu: $*"; }
+die() { printf '%s\n' "sclive4-emu: $*" >&2; exit 1; }
+
+[ "$(uname -s)" = Darwin ] || die "this is the macOS launcher; on Linux run emu.sh directly"
+
+need_lima() {
+    command -v limactl >/dev/null 2>&1 && return 0
+    command -v brew >/dev/null 2>&1 || die "Lima isn't installed. Install Homebrew from https://brew.sh, then run: sclive4-emu install"
+    say "installing Lima with Homebrew"
+    brew install lima || die "brew install lima failed"
+}
+
+vm_status() { limactl list --format '{{.Status}}' "$VM" 2>/dev/null | head -n 1; }
+
+need_vm() {
+    need_lima
+    mkdir -p "$SHARE"
+    case "$(vm_status)" in
+        Running) return 0 ;;
+        Stopped) say "starting the VM"; limactl start "$VM" >/dev/null || die "the VM didn't start (limactl start $VM)" ;;
+        "")
+            say "creating the VM (downloads Ubuntu 24.04, a few minutes the first time)"
+            limactl create --name="$VM" --tty=false "$YAML" || die "couldn't create the VM"
+            limactl start "$VM" || die "the VM didn't start (limactl start $VM)"
+            ;;
+        *) say "VM is $(vm_status); trying to start it"; limactl start "$VM" || die "the VM didn't start" ;;
+    esac
+}
+
+vm() { limactl shell --workdir / "$VM" "$@"; }
+emu() { vm sudo "$EMU" "$@"; }
+
+# A path the VM can see: anything in the home folder as is, anything else copied into ~/SCLive4Emulator.
+vm_path() {
+    local p
+    p="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")" || die "no such file: $1"
+    [ -e "$p" ] || die "no such file: $1"
+    case "$p" in
+        "$HOME"/*) printf '%s\n' "$p" ;;
+        *) mkdir -p "$SHARE/files"; cp -R "$p" "$SHARE/files/" || die "couldn't copy $p"; printf '%s\n' "$SHARE/files/$(basename "$p")" ;;
+    esac
+}
+
+cmd="${1:-status}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+install)
+    need_vm
+    vm sudo test -x "$EMU" || die "the emulator didn't get cloned into the VM; check your internet connection and run: sclive4-emu update"
+    say "ready. Next: sclive4-emu setup ~/Downloads/<SC LIVE 4 firmware file>"
+    ;;
+setup)
+    [ $# -ge 1 ] || die "usage: sclive4-emu setup FIRMWARE [ENGINEX_BUNDLE]"
+    need_vm
+    fw="$(vm_path "$1")"; shift
+    if [ $# -ge 1 ]; then b="$(vm_path "$1")"; shift; emu setup "$fw" "$b" "$@"; else emu setup "$fw" "$@"; fi
+    ;;
+start)
+    need_vm
+    # In its own session, so the deck keeps running when this command's SSH session to the VM ends.
+    vm sudo setsid -w "$EMU" start "$@" </dev/null && { say "deck: $DECK_URL"; open "$DECK_URL"; }
+    ;;
+open) open "$DECK_URL" ;;
+console) open "$CONSOLE_URL" ;;
+drive)
+    need_vm
+    if [ "${1:-}" = add ] && [ $# -ge 2 ]; then
+        d="$(vm_path "$2")"
+        case "$d" in
+            "$SHARE"/*) ;;
+            *) say "note: $d is read-only in the VM, so Engine can't write its library there. Move the folder into $SHARE to use it fully." ;;
+        esac
+        shift 2; emu drive add "$d" "$@"
+    else
+        emu drive "$@"
+    fi
+    ;;
+update)
+    if [ -d "$HERE/../.git" ] && command -v git >/dev/null 2>&1; then
+        say "updating this folder"; git -C "$HERE/.." pull --ff-only || say "couldn't update $HERE/.. (local changes?)"
+    fi
+    need_vm
+    say "updating the emulator in the VM"
+    vm sudo sh -c "[ -d /opt/sclive4-emulator/.git ] || git clone https://github.com/jonathanrobichaud4/sclive4-emulator /opt/sclive4-emulator; git -C /opt/sclive4-emulator pull --ff-only"
+    ;;
+vm-stop)
+    need_lima
+    if [ "$(vm_status)" = Running ]; then emu stop >/dev/null 2>&1; limactl stop "$VM"; else say "the VM isn't running"; fi
+    ;;
+uninstall)
+    need_lima
+    [ -n "$(vm_status)" ] || { say "there's no VM to delete"; exit 0; }
+    printf 'Delete the VM "%s" and the deck inside it? Your files in %s stay. [y/N] ' "$VM" "$SHARE"
+    read -r a; case "$a" in y|Y|yes) ;; *) say "left as it was"; exit 0 ;; esac
+    limactl stop -f "$VM" >/dev/null 2>&1; limactl delete "$VM" && say "deleted"
+    ;;
+help|-h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+*)
+    need_vm
+    emu "$cmd" "$@"
+    ;;
+esac

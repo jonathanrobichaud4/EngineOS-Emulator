@@ -31,6 +31,26 @@ Not emulated yet:
 
 Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler).
 
+## macOS (Apple Silicon or Intel)
+
+The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows. `mac/sclive4-emu` does all of it from Terminal:
+
+```sh
+git clone https://github.com/jonathanrobichaud4/sclive4-emulator
+cd sclive4-emulator/mac
+./sclive4-emu install                                  # installs Lima (Homebrew) and creates the VM
+./sclive4-emu setup ~/Downloads/<SC LIVE 4 firmware>   # .img, Windows .exe or Mac .zip updater
+./sclive4-emu start                                    # opens http://localhost:8090
+```
+
+- After that, double-click **Start SC LIVE 4 Emulator.command** in Finder to start it (the first time, right-click > Open).
+- `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./sclive4-emu graphics software`, `./sclive4-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
+- Your home folder is visible in the VM read-only, so firmware and mod files can be anywhere in it. **Drives:** Engine writes its library onto a drive, so put folders you plug in as drives in `~/SCLive4Emulator` (writable from the VM): `./sclive4-emu drive add ~/SCLive4Emulator/Music`.
+- It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`mac/lima.yaml` sets these).
+- On Apple Silicon the VM is ARM64 Linux. Apple's chips can't run Engine's 32-bit ARM code directly, so it still goes through qemu-arm, as on a PC.
+
+Not yet tried on a real Mac: the Linux side is the same as on WSL, but the Lima VM and the launcher were only checked by dry runs. Tell me what breaks.
+
 ## What you need
 
 - Windows 10/11 with WSL2 and Ubuntu (22.04 or 24.04). If you don't have it, open PowerShell as admin and run `wsl --install -d Ubuntu`, then reboot.

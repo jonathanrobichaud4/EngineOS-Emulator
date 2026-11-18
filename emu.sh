@@ -2,7 +2,8 @@
 # EngineX emulator for SC LIVE 4 (JP21). Runs the real ARM Engine binary from the stock
 # firmware under qemu-user in a chroot, with EngineX's hook preloaded. The browser page shows
 # the whole deck: touchscreen, every control (as the internal MIDI control surface), LEDs and
-# audio out. Meant for WSL2 (Ubuntu) or any x86_64 Linux.
+# audio out. Meant for WSL2 (Ubuntu), any x86_64 or ARM64 Linux, or macOS through mac/sclive4-emu
+# (a Lima VM).
 #
 #   sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]   build ./rootfs (once per firmware)
 #   sudo ./emu.sh --profile NAME <command>               use a separate deck (e.g. a stock Engine OS one)

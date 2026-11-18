@@ -1,0 +1,63 @@
+# Lima VM for the SC LIVE 4 emulator on macOS (used by mac/sclive4-emu).
+#
+# The emulator needs Linux: qemu-user, chroot and network namespaces. On a Mac it runs in this
+# small Ubuntu VM, the same way it runs in WSL on Windows. On Apple Silicon the VM is ARM64
+# Linux under Apple's Virtualization framework; Engine's 32-bit ARM code still goes through
+# qemu-arm (Apple's chips can't run 32-bit ARM), registered by emu.sh itself.
+#
+# The emulator lives in the VM at /opt/sclive4-emulator (a git clone, updated with
+# "sclive4-emu update"). Its deck files stay on the VM's own disk, since the deck's root
+# filesystem needs Linux permissions and device nodes.
+#
+# Your home folder is visible in the VM at the same path, read-only, so the launcher can hand
+# emu.sh a firmware file without copying it. ~/SCLive4Emulator is writable: folders plugged in
+# as USB drives should live there, because Engine writes its library onto the drive.
+
+vmType: vz
+cpus: 4
+memory: 6GiB
+disk: 40GiB
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+
+mounts:
+  - location: "~"
+    writable: false
+  - location: "~/SCLive4Emulator"
+    writable: true
+
+mountType: virtiofs
+
+# The deck page and the EngineX console. emu.sh's viewer listens on all interfaces in the VM;
+# these make them http://localhost:8090 and http://localhost:8080 on the Mac.
+portForwards:
+  - guestPort: 8090
+    hostPort: 8090
+  - guestPort: 8080
+    hostPort: 8080
+  # Nothing else: Engine opens plenty of ports of its own that shouldn't land on the Mac.
+  - guestPortRange: [1, 65535]
+    ignore: true
+
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      command -v git >/dev/null || { apt-get update -qq; apt-get install -y -qq git; }
+      [ -d /opt/sclive4-emulator/.git ] ||
+        git clone https://github.com/jonathanrobichaud4/sclive4-emulator /opt/sclive4-emulator
+
+message: |
+  The SC LIVE 4 emulator VM is ready. Next:
+    sclive4-emu setup ~/Downloads/<SC LIVE 4 firmware>
+    sclive4-emu start
