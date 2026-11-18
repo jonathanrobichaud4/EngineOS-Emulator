@@ -159,6 +159,17 @@ class Surface:
             return
         c, act = self.ctl[parts[0]], parts[1]
         arg = float(parts[2]) if len(parts) > 2 else 0
+        if "hw" in c:
+            # The deck's own mixer hardware (master, headphones): nothing goes to Engine; the
+            # value is kept for the emulator's audio mixer. Buttons toggle.
+            if act == "set":
+                self.values[c["id"]] = arg
+            elif act == "press" and c["t"] == "btn":
+                self.values[c["id"]] = 0 if self.values.get(c["id"]) else 1
+            with self.cond:
+                self.seq += 1
+                self.cond.notify_all()
+            return
         ch, t, out = c["ch"], c["t"], []
         if act in ("press", "release"):
             note = c.get("n") if t in ("btn", "pad") else c.get("push") if t == "enc" else c.get("touch")
