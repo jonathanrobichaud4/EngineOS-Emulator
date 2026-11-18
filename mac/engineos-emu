@@ -16,7 +16,7 @@
 #   engineos-emu vm-stop                      stop the VM itself (frees its memory)
 #   engineos-emu uninstall [--yes]            delete the VM and everything in it
 #   engineos-emu state                        key=value lines for the Mac app (never starts the VM),
-#                                            with deck=NAME<TAB>set up<TAB>EngineX<TAB>running lines
+#                                            with deck=NAME<TAB>set up<TAB>EngineX<TAB>running<TAB>model lines
 #   engineos-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
 #                                            shell, info, profiles, identify, reset-data, ...)
 #
@@ -209,15 +209,19 @@ state)
     st=$(vm_status); echo "vm=${st:-none}"
     [ "$st" = Running ] || exit 0
     emu info 2>/dev/null
-    # Every deck: name, set up, EngineX version, running.
+    # Every deck: name, set up, EngineX version, running, model. A deck made with "profile new"
+    # has only its state folder until it's set up.
     vm sudo sh -c 'cd /opt/engineos-emulator 2>/dev/null || cd /opt/sclive4-emulator 2>/dev/null || exit 0
-        for d in rootfs rootfs-*; do
+        seen=" "
+        for d in rootfs rootfs-* state state-*; do
             [ -d "$d" ] || continue
-            n=${d#rootfs}; n=${n#-}; [ -n "$n" ] || n=default
-            s=state${d#rootfs}; set=no; run=no
-            [ -x "$d/usr/Engine/Engine" ] && set=yes
-            [ -f "$s/emu.pid" ] && kill -0 "$(cat "$s/emu.pid")" 2>/dev/null && run=yes
-            printf "deck=%s\t%s\t%s\t%s\n" "$n" "$set" "$(head -n1 "$d/data/enginex/version.txt" 2>/dev/null)" "$run"
+            case "$d" in rootfs*) x=${d#rootfs} ;; *) x=${d#state} ;; esac
+            n=${x#-}; [ -n "$n" ] || n=default
+            case "$seen" in *" $n "*) continue ;; esac; seen="$seen$n "
+            set=no; run=no; model=$(cat "state$x/product" 2>/dev/null); [ -n "$model" ] || model=JP21
+            [ -x "rootfs$x/usr/Engine/Engine" ] && set=yes
+            [ -f "state$x/emu.pid" ] && kill -0 "$(cat "state$x/emu.pid")" 2>/dev/null && run=yes
+            printf "deck=%s\t%s\t%s\t%s\t%s\n" "$n" "$set" "$(head -n1 "rootfs$x/data/enginex/version.txt" 2>/dev/null)" "$run" "$model"
         done' 2>/dev/null
     exit 0
     ;;

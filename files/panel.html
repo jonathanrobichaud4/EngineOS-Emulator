@@ -276,9 +276,10 @@ function drawJogLcd(cv,ch,st){
 // ---------------------------------------------------------------- LEDs and values from the server
 function applyLeds(){
   for(const c of P.controls){if(!c.id)continue;const v=views[c.id];if(!v)continue;
-    if(v.led){const key=c.t==="enc"?`n${c.ch}.${c.push}`:`n${c.ch}.${c.n}`;v.led(leds[key]||0)}
-    if(v.cc)v.cc(leds[`c${c.ch}.${c.cc}`]||0);
-    if(c.t==="pitch"&&views[c.id+"#led"]){views[c.id+"#led"].style.background=leds[`n${c.ch}.${c.led}`]?"#ff4b3e":"#222"}
+    const D=c.dev?`d${c.dev}`:"";  // which of the deck's MIDI devices (Prime 4: 1 = mixer)
+    if(v.led){const key=c.t==="enc"?`${D}n${c.ch}.${c.push}`:`${D}n${c.ch}.${c.n}`;v.led(leds[key]||0)}
+    if(v.cc)v.cc(leds[`${D}c${c.ch}.${c.cc}`]||0);
+    if(c.t==="pitch"&&views[c.id+"#led"]){views[c.id+"#led"].style.background=leds[`${D}n${c.ch}.${c.led}`]?"#ff4b3e":"#222"}
     if(v.jog)v.jog(jogs[String(c.ch)])}}
 async function stateLoop(){let seq=-1,first=true;
   for(;;){try{const r=await fetch("/state?since="+seq,{cache:"no-store"});const s=await r.json();

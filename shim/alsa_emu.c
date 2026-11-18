@@ -56,16 +56,70 @@ static double now_s(void) {
 
 /* ===================================================================== cards ============ */
 
-struct fcard { const char *id, *name, *components; int midi; int pcm_play, pcm_cap; };
-/* The deck's built-in codec, its serial control surface and its USB audio gadget.
- * Names follow the deck where known; EMU_CARDS can't change them yet. */
-static const struct fcard g_cards[] = {
-    {"Surface", "Control Surface", "", 1, 0, 0},
-    {"JP21", "JP21", "", 0, 1, 1},
-    {"UAC2Gadget", "UAC2_Gadget", "", 0, 1, 0},
+/* ===================================================================== products ======= */
+/* What the emulated deck is, from the product code Engine itself reads
+ * (/sys/firmware/devicetree/base/inmusic,product-code, which emu.sh writes):
+ *   - its sound card: the name Engine's allowlist expects, its PCM name, channels
+ *     (0 = whatever Engine asks for);
+ *   - its internal MIDI devices. Engine sends every sequencer client an identity request
+ *     and binds an assignment file by the reply (KnownDevices.vfsb): "7E ?? 06 02 00 02 0B
+ *     <family> ..." plus, on the Prime 4, a last byte telling Controller (00), Mixer (20),
+ *     Left Display (10) and Right Display (30) apart. */
+struct fdev { int client; const char *name; unsigned char tail; };
+struct fproduct {
+    const char *code, *card_name, *pcm_name; int out_ch, in_ch;
+    unsigned char family; int ndev; struct fdev devs[4];
 };
-#define NCARDS (int)(sizeof g_cards / sizeof g_cards[0])
-#define MIDI_CARD 0
+static const struct fproduct g_products[] = {
+    /* SC LIVE 4: one serial control surface; its reply is the controller's own (see device_receive). */
+    {"JP21", "JP21", "JP21 PCM inmusic,jp21-audio-codec-0", 8, 2, 0x12, 1, {{16, "Control Surface", 0}}},
+    /* Prime 4 and Prime 4+: four USB MIDI devices inside the unit. */
+    {"JC11", "PRIME 4 Audio", "PRIME 4 Audio PCM", 0, 0, 0x08, 4,
+     {{20, "PRIME 4 Controller", 0x00}, {24, "PRIME 4 Mixer", 0x20}, {28, "PRIME 4 Left Display", 0x10}, {32, "PRIME 4 Right Display", 0x30}}},
+    {"JC11S", "PRIME 4 Audio", "PRIME 4 Audio PCM", 0, 0, 0x08, 4,
+     {{20, "PRIME 4+ Controller", 0x00}, {24, "PRIME 4+ Mixer", 0x20}, {28, "PRIME 4+ Left Display", 0x10}, {32, "PRIME 4+ Right Display", 0x30}}},
+};
+static const struct fproduct *product(void) {
+    static const struct fproduct *p;
+    if (p) return p;
+    char code[16] = {0};
+    const char *env = getenv("EMU_PRODUCT");
+    if (env && *env) snprintf(code, sizeof code, "%s", env);
+    else {
+        int fd = open("/sys/firmware/devicetree/base/inmusic,product-code", O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) { ssize_t n = read(fd, code, sizeof code - 1); close(fd); if (n > 0) code[n] = 0; }
+        for (char *c = code; *c; c++) if (*c == '\n' || *c == '\r') { *c = 0; break; }
+    }
+    p = &g_products[0];
+    for (size_t i = 0; i < sizeof g_products / sizeof g_products[0]; i++)
+        if (!strcmp(code, g_products[i].code)) p = &g_products[i];
+    return p;
+}
+
+struct fcard { const char *id, *name, *components; int midi; int pcm_play, pcm_cap; };
+/* Cards: one per internal MIDI device, then the deck's built-in codec, then its USB audio
+ * gadget. On the SC LIVE 4 that's Control Surface (0), JP21 (1), UAC2_Gadget (2). */
+#define MAXCARDS 8
+static struct fcard g_cards[MAXCARDS];
+static int NCARDS_, AUDIO_CARD, UAC_CARD;
+static char g_card_ids[4][16];
+static void cards_init(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    const struct fproduct *p = product();
+    int n = 0;
+    for (int i = 0; i < p->ndev; i++) {
+        snprintf(g_card_ids[i], sizeof g_card_ids[i], i ? "Surface%d" : "Surface", i);
+        g_cards[n++] = (struct fcard){g_card_ids[i], p->devs[i].name, "", 1, 0, 0};
+    }
+    AUDIO_CARD = n;
+    g_cards[n++] = (struct fcard){p->code, p->card_name, "", 0, 1, 1};
+    UAC_CARD = n;
+    g_cards[n++] = (struct fcard){"UAC2Gadget", "UAC2_Gadget", "", 0, 1, 0};
+    NCARDS_ = n;
+}
+#define NCARDS (cards_init(), NCARDS_)
 
 EXPORT int snd_card_next(int *card) {
     if (!card) return -EINVAL;
@@ -132,7 +186,7 @@ EXPORT int snd_ctl_pcm_info(snd_ctl_t *ctl, snd_pcm_info_t *info) {
     if (i->stream == SND_PCM_STREAM_PLAYBACK && !c->pcm_play) return -ENOENT;
     if (i->stream == SND_PCM_STREAM_CAPTURE && !c->pcm_cap) return -ENOENT;
     i->card = f->card;
-    if (f->card == 1) snprintf(i->name, sizeof i->name, "JP21 PCM inmusic,jp21-audio-codec-0");
+    if (f->card == AUDIO_CARD) snprintf(i->name, sizeof i->name, "%s", product()->pcm_name);
     else snprintf(i->name, sizeof i->name, "UAC2 PCM");
     return 0;
 }
@@ -170,9 +224,14 @@ EXPORT int snd_ctl_elem_write(snd_ctl_t *ctl, snd_ctl_elem_value_t *val) {
 
 /* ===================================================================== sequencer ======== */
 
-#define DEV_CLIENT 16
 #define DEV_PORT 0
 #define THRU_CLIENT 14
+/* Which internal device a sequencer client is (index into product()->devs), or -1. */
+static int dev_of_client(int c) {
+    const struct fproduct *p = product();
+    for (int i = 0; i < p->ndev; i++) if (p->devs[i].client == c) return i;
+    return -1;
+}
 
 struct fport { int client, port; char name[64]; unsigned caps, type; int used; };
 struct fsub { snd_seq_addr_t sender, dest; int used; };
@@ -203,15 +262,21 @@ static void seq_world_init(void) {
     unsigned rw = SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_READ |
                   SND_SEQ_PORT_CAP_SUBS_WRITE;
     struct fport p2 = {THRU_CLIENT, 0, "Midi Through Port-0", rw, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_SOFTWARE, 1};
-    struct fport p3 = {DEV_CLIENT, DEV_PORT, "Control Surface", rw | SND_SEQ_PORT_CAP_DUPLEX,
-                       SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_HARDWARE | SND_SEQ_PORT_TYPE_PORT, 1};
     (void)p2; /* the deck has no Midi Through client */
-    g_ports[0] = p0; g_ports[1] = p1; g_ports[2] = p3;
+    g_ports[0] = p0; g_ports[1] = p1;
+    const struct fproduct *p = product();
+    for (int i = 0; i < p->ndev; i++) {
+        struct fport d = {p->devs[i].client, DEV_PORT, "", rw | SND_SEQ_PORT_CAP_DUPLEX,
+                          SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_HARDWARE | SND_SEQ_PORT_TYPE_PORT, 1};
+        snprintf(d.name, sizeof d.name, "%s", p->devs[i].name);
+        g_ports[2 + i] = d;
+    }
 }
 
 static const char *client_name(int c) {
     if (c == 0) return "System";
-    if (c == DEV_CLIENT) return "Control Surface";
+    int d = dev_of_client(c);
+    if (d >= 0) return product()->devs[d].name;
     for (int i = 0; i < MAXSEQ; i++) if (g_seqs[i] && g_seqs[i]->client == c) return g_seqs[i]->name;
     return NULL;
 }
@@ -236,15 +301,16 @@ static void enqueue(struct fseq *s, const snd_seq_event_t *ev, const unsigned ch
     if (write(s->pipe[1], &b, 1) < 0) {}
 }
 
-/* Deliver an event from the controller (16:0) to everyone subscribed to it. */
-static void device_send(const snd_seq_event_t *tmpl, const unsigned char *ext, unsigned extlen) {
+/* Deliver an event from internal device `dev` to everyone subscribed to it. */
+static void device_send(int dev, const snd_seq_event_t *tmpl, const unsigned char *ext, unsigned extlen) {
+    int client = product()->devs[dev].client;
     pthread_mutex_lock(&g_lock);
     for (int i = 0; i < MAXSUBS; i++) {
-        if (!g_subs[i].used || g_subs[i].sender.client != DEV_CLIENT || g_subs[i].sender.port != DEV_PORT) continue;
+        if (!g_subs[i].used || g_subs[i].sender.client != client || g_subs[i].sender.port != DEV_PORT) continue;
         struct fseq *s = seq_by_client(g_subs[i].dest.client);
         if (!s) continue;
         snd_seq_event_t ev = *tmpl;
-        ev.source.client = DEV_CLIENT; ev.source.port = DEV_PORT;
+        ev.source.client = client; ev.source.port = DEV_PORT;
         ev.dest = g_subs[i].dest;
         ev.queue = SND_SEQ_QUEUE_DIRECT;
         enqueue(s, &ev, ext, extlen);
@@ -253,9 +319,13 @@ static void device_send(const snd_seq_event_t *tmpl, const unsigned char *ext, u
 }
 
 /* Raw MIDI bytes -> sequencer events (from the panel), with running status and SysEx. */
-static void device_bytes(const unsigned char *b, int n) {
-    static unsigned char run, sx[4096];
-    static int sxlen = -1;
+static struct { unsigned char run, sx[4096], d[2]; int sxlen, dn; } g_parse[4] = {{.sxlen = -1}, {.sxlen = -1}, {.sxlen = -1}, {.sxlen = -1}};
+static void device_bytes(int dev, const unsigned char *b, int n) {
+#define run g_parse[dev].run
+#define sx g_parse[dev].sx
+#define sxlen g_parse[dev].sxlen
+#define d g_parse[dev].d
+#define dn g_parse[dev].dn
     for (int i = 0; i < n; i++) {
         unsigned char c = b[i];
         if (c == 0xF0) { sxlen = 0; sx[sxlen++] = c; continue; }
@@ -264,7 +334,7 @@ static void device_bytes(const unsigned char *b, int n) {
             if (c == 0xF7) {
                 snd_seq_event_t ev = {0};
                 ev.type = SND_SEQ_EVENT_SYSEX;
-                device_send(&ev, sx, sxlen);
+                device_send(dev, &ev, sx, sxlen);
                 sxlen = -1;
             }
             continue;
@@ -273,7 +343,6 @@ static void device_bytes(const unsigned char *b, int n) {
         if (!run) continue;
         unsigned char st = run & 0xF0, ch = run & 0x0F;
         int need = (st == 0xC0 || st == 0xD0) ? 1 : 2;
-        static unsigned char d[2]; static int dn;
         d[dn++] = c;
         if (dn < need) continue;
         dn = 0;
@@ -288,27 +357,44 @@ static void device_bytes(const unsigned char *b, int n) {
         case 0xE0: ev.type = SND_SEQ_EVENT_PITCHBEND; ev.data.control.channel = ch; ev.data.control.value = ((d[1] << 7) | d[0]) - 8192; break;
         default: continue;
         }
-        device_send(&ev, NULL, 0);
+        device_send(dev, &ev, NULL, 0);
     }
+#undef run
+#undef sx
+#undef sxlen
+#undef d
+#undef dn
 }
 
-static void device_out_line(const unsigned char *b, int n) {
+/* MIDI Engine sends to a device: one hex line per message in /tmp/emu/midi-out, with "@N "
+ * in front for any device but the first (the viewer turns these into lights and displays). */
+static void device_out_line(int dev, const unsigned char *b, int n) {
     if (g_midi_out_fd < 0) {
         g_midi_out_fd = open("/tmp/emu/midi-out", O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
         if (g_midi_out_fd < 0) return;
     }
     struct stat st;
     if (!fstat(g_midi_out_fd, &st) && st.st_size > (8 << 20)) { if (ftruncate(g_midi_out_fd, 0)) {} }
-    char line[3 * 4096 + 2]; int o = 0;
+    char line[3 * 4096 + 8]; int o = 0;
+    if (dev) o = sprintf(line, "@%d ", dev);
     for (int i = 0; i < n && o < (int)sizeof line - 4; i++) o += sprintf(line + o, i ? " %02x" : "%02x", b[i]);
     line[o++] = '\n';
     if (write(g_midi_out_fd, line, o) < 0) {}
 }
 
 /* What the real controller firmware answers by itself. */
-static void device_receive(const unsigned char *b, int n) {
-    device_out_line(b, n);
-    if (n >= 6 && b[0] == 0xF0 && b[1] == 0x7E && b[3] == 0x06 && b[4] == 0x01) {
+static void device_receive(int dev, const unsigned char *b, int n) {
+    const struct fproduct *p = product();
+    device_out_line(dev, b, n);
+    if (n >= 6 && b[0] == 0xF0 && b[1] == 0x7E && b[3] == 0x06 && b[4] == 0x01 && p->family != 0x12) {
+        /* identity reply: inMusic (00 02 0B), the product's family, six bytes of model and
+         * version, then the byte that says which of the unit's devices this is */
+        unsigned char id[] = {0xF0, 0x7E, 0x00, 0x06, 0x02, 0x00, 0x02, 0x0B, p->family,
+                              0x00, 0x00, 0x01, 0x00, 0x00, 0x00, p->devs[dev].tail, 0xF7};
+        DBG("identity request -> %s %s reply", p->code, p->devs[dev].name);
+        snd_seq_event_t ev = {0}; ev.type = SND_SEQ_EVENT_SYSEX;
+        device_send(dev, &ev, id, sizeof id);
+    } else if (n >= 6 && b[0] == 0xF0 && b[1] == 0x7E && b[3] == 0x06 && b[4] == 0x01) {
         /* identity reply in the JP21 controller's format: inMusic (00 02 0B), family 12,
          * firmware 1.3.0.2 (matches the bundled controller firmware, so no update prompt),
          * then a 15-character serial. The serial is a placeholder, never a real unit's. */
@@ -318,12 +404,12 @@ static void device_receive(const unsigned char *b, int n) {
                                            0x00, 0xF7};
         DBG("identity request -> JP21 reply");
         snd_seq_event_t ev = {0}; ev.type = SND_SEQ_EVENT_SYSEX;
-        device_send(&ev, id, sizeof id);
+        device_send(dev, &ev, id, sizeof id);
     } else if (n >= 10 && b[0] == 0xF0 && b[1] == 0x00 && b[2] == 0x02 && b[3] == 0x0B && b[6] == 0x42) {
         /* power-on button state: nothing held (holding Shift+Pad 1 would ask for test mode) */
-        static const unsigned char r[] = {0xF0, 0x00, 0x02, 0x0B, 0x7F, 0x12, 0x42, 0x00, 0x01, 0x00, 0xF7};
+        const unsigned char r[] = {0xF0, 0x00, 0x02, 0x0B, 0x7F, p->family, 0x42, 0x00, 0x01, 0x00, 0xF7};
         snd_seq_event_t ev = {0}; ev.type = SND_SEQ_EVENT_SYSEX;
-        device_send(&ev, r, sizeof r);
+        device_send(dev, &ev, r, sizeof r);
     }
 }
 
@@ -354,12 +440,14 @@ static void *midi_in_thread(void *arg) {
         char line[16384];
         while (fgets(line, sizeof line, f)) {
             unsigned char b[4096]; int n = 0; char *p = line, *e;
+            int dev = 0; /* "@N " in front: for internal device N (Prime 4: 1 Mixer, 2/3 Displays) */
+            if (*p == '@') { dev = atoi(p + 1); while (*p && *p != ' ') p++; if (dev < 0 || dev >= product()->ndev) dev = 0; }
             for (;;) {
                 long v = strtol(p, &e, 16);
                 if (e == p || n >= (int)sizeof b) break;
                 b[n++] = (unsigned char)v; p = e;
             }
-            if (n) device_bytes(b, n);
+            if (n) device_bytes(dev, b, n);
         }
         fclose(f);
     }
@@ -451,19 +539,19 @@ EXPORT int snd_seq_free_event(snd_seq_event_t *ev) { (void)ev; return 0; }
 static void route_from_engine(struct fseq *s, const snd_seq_event_t *ev) {
     unsigned char b[4096];
     int n = event_to_bytes(ev, b, sizeof b);
-    int to_dev = 0, to_thru = 0;
-    if (ev->dest.client == DEV_CLIENT) to_dev = 1;
+    int to_dev = 0, to_thru = 0; /* to_dev: bit per internal device */
+    if (dev_of_client(ev->dest.client) >= 0) to_dev = 1 << dev_of_client(ev->dest.client);
     else if (ev->dest.client == THRU_CLIENT) to_thru = 1;
     else if (ev->dest.client == SND_SEQ_ADDRESS_SUBSCRIBERS) {
         pthread_mutex_lock(&g_lock);
         for (int i = 0; i < MAXSUBS; i++) {
             if (!g_subs[i].used || g_subs[i].sender.client != s->client || g_subs[i].sender.port != ev->source.port) continue;
-            if (g_subs[i].dest.client == DEV_CLIENT) to_dev = 1;
+            if (dev_of_client(g_subs[i].dest.client) >= 0) to_dev |= 1 << dev_of_client(g_subs[i].dest.client);
             if (g_subs[i].dest.client == THRU_CLIENT) to_thru = 1;
         }
         pthread_mutex_unlock(&g_lock);
     }
-    if (to_dev && n) device_receive(b, n);
+    for (int dv = 0; n && dv < 4; dv++) if (to_dev & (1 << dv)) device_receive(dv, b, n);
     if (to_thru) { /* Midi Through just echoes */
         pthread_mutex_lock(&g_lock);
         for (int i = 0; i < MAXSUBS; i++) {
@@ -506,7 +594,7 @@ static void fill_client(struct fclient_info *i, int c) {
     i->client = c;
     snprintf(i->name, sizeof i->name, "%s", n ? n : "");
     i->type = c < 128 ? SND_SEQ_KERNEL_CLIENT : SND_SEQ_USER_CLIENT;
-    i->card = c == DEV_CLIENT ? MIDI_CARD : -1;
+    i->card = dev_of_client(c); /* device N is card N */
 }
 EXPORT int snd_seq_get_any_client_info(snd_seq_t *h, int client, snd_seq_client_info_t *info) {
     (void)h;
@@ -810,8 +898,11 @@ EXPORT int snd_pcm_hw_params_any(snd_pcm_t *pcm, snd_pcm_hw_params_t *params) {
     /* What the deck's hardware offers: the JP21 codec does 8 out (main, booth, phones...)
      * and 2 in (mic/aux), the USB gadget 2 out. Engine sizes its streams from these. */
     int card = card_from_name(p->name);
-    if (card == 1) { h->ch_min = h->ch_max = p->stream == SND_PCM_STREAM_PLAYBACK ? 8 : 2; }
-    else if (card == 2) { h->ch_min = h->ch_max = 2; h->rate_min = h->rate_max = 48000; }
+    cards_init();
+    if (card == AUDIO_CARD) {
+        int ch = p->stream == SND_PCM_STREAM_PLAYBACK ? product()->out_ch : product()->in_ch;
+        if (ch) h->ch_min = h->ch_max = ch; /* else: whatever Engine asks for (logged with EMU_DEBUG) */
+    } else if (card == UAC_CARD) { h->ch_min = h->ch_max = 2; h->rate_min = h->rate_max = 48000; }
     h->per_min = 16; h->per_max = 8192; h->buf_min = 32; h->buf_max = 65536;
     return 0;
 }

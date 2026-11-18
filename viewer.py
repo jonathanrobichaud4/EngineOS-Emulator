@@ -99,7 +99,11 @@ class Fifo:
 
 # ------------------------------------------------------------------------------ controls
 class Surface:
-    """The control surface: panel events -> JP21 MIDI, Engine's MIDI -> LED state."""
+    """The control surface: panel events -> the deck's MIDI, Engine's MIDI -> LED state.
+
+    A control's "dev" (default 0) is which of the deck's internal MIDI devices it belongs to:
+    the SC LIVE 4 has one; the Prime 4 has the Controller (0), the Mixer (1) and the left and
+    right jog displays (2, 3). Lines for device N > 0 carry "@N " in front, both ways."""
 
     def __init__(self, emu, panel):
         self.emu = emu
@@ -143,6 +147,11 @@ class Surface:
             return [f"{0xB0 | ch:02x} {c['cc']:02x} {val:02x}"]
         return []
 
+    @staticmethod
+    def tag(c, lines):
+        d = c.get("dev", 0)
+        return [f"@{d} {x}" for x in lines] if d else lines
+
     def event(self, line):
         """One panel event: '<id> <action> [value]'."""
         parts = line.split()
@@ -156,35 +165,37 @@ class Surface:
             if note is None:
                 return
             out.append(f"{0x90 | ch:02x} {note:02x} 7f" if act == "press" else f"{0x80 | ch:02x} {note:02x} 00")
+            out = self.tag(c, out)
         elif act == "set":
             if t in ("sw", "sel"):
                 arg = max(0, min(len(c["vals"]) - 1, int(arg)))
             elif t == "pitch":
                 arg = max(0, min(16383, int(arg)))
             self.values[c["id"]] = arg
-            out += self.msgs_for(c, arg)
+            out += self.tag(c, self.msgs_for(c, arg))
         elif act == "turn" and t == "enc":
             n = int(arg)
             for _ in range(min(abs(n), 32)):
                 out.append(f"{0xB0 | ch:02x} {c['cc']:02x} {'01' if n > 0 else '7f'}")
+            out = self.tag(c, out)
         elif act == "spin" and t == "jog":
             v = (int(self.values[c["id"]]) + int(arg)) & 0x3FFF
             self.values[c["id"]] = v
-            out += self.msgs_for(c, v)
+            out += self.tag(c, self.msgs_for(c, v))
         if out:
             self.midi.send("\n".join(out) + "\n")
             with self.cond:
                 self.seq += 1
                 self.cond.notify_all()
 
-    def replay(self):
-        """Answer Engine's 'report absolute controls' SysEx like the hardware does."""
+    def replay(self, dev=0):
+        """Answer Engine's 'report absolute controls' SysEx like the hardware does (per device)."""
         out = []
         for cid, v in self.values.items():
             c = self.ctl[cid]
-            if c["t"] == "jog":
+            if c["t"] == "jog" or c.get("dev", 0) != dev:
                 continue
-            out += self.msgs_for(c, v)
+            out += self.tag(c, self.msgs_for(c, v))
         self.midi.send("\n".join(out) + "\n")
 
     def follow(self):
@@ -211,19 +222,28 @@ class Surface:
             pos += end
             changed = False
             for line in data[:end].decode("ascii", "ignore").splitlines():
-                b = [int(x, 16) for x in line.split() if x]
+                dev, pre = 0, ""
+                if line.startswith("@"):
+                    tag, _, line = line.partition(" ")
+                    dev = int(tag[1:] or 0)
+                    pre = f"d{dev}" if dev else ""
+                try:
+                    b = [int(x, 16) for x in line.split() if x]
+                except ValueError:
+                    continue
                 if not b:
                     continue
                 st_, ch = b[0] & 0xF0, b[0] & 0x0F
                 if st_ in (0x90, 0x80) and len(b) >= 3:
-                    self.leds[f"n{ch}.{b[1]}"] = b[2] if st_ == 0x90 else 0
+                    self.leds[f"{pre}n{ch}.{b[1]}"] = b[2] if st_ == 0x90 else 0
                     changed = True
                 elif st_ == 0xB0 and len(b) >= 3:
-                    self.leds[f"c{ch}.{b[1]}"] = b[2]
+                    self.leds[f"{pre}c{ch}.{b[1]}"] = b[2]
                     changed = True
-                elif b[0] == 0xF0 and b[1:7] == [0x00, 0x02, 0x0B, 0x7F, 0x12, 0x04]:
-                    threading.Thread(target=self.replay, daemon=True).start()
-                elif b[0] == 0xF0 and b[1:4] == [0x00, 0x02, 0x0B] and len(b) >= 8 and b[4] < 0x10:
+                elif b[0] == 0xF0 and b[1:5] == [0x00, 0x02, 0x0B, 0x7F] and len(b) >= 7 and b[6] == 0x04:
+                    # "report every control's position", F0 00 02 0B 7F <family> 04 F7
+                    threading.Thread(target=self.replay, args=(dev,), daemon=True).start()
+                elif dev == 0 and b[0] == 0xF0 and b[1:4] == [0x00, 0x02, 0x0B] and len(b) >= 8 and b[4] < 0x10:
                     # The jog display's digits (LcdWheelDisplay.qml): F0 00 02 0B <ch> 00|01 h m s cs F7
                     # is the time (01: counting down), F0 00 02 0B <ch> 02 <6 hex nibbles> F7 the BPM x 100.
                     j = self.jog.setdefault(str(b[4]), {})
@@ -527,13 +547,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rootfs", default=os.environ.get("EMU_ROOTFS", "rootfs"))
     ap.add_argument("--port", type=int, default=8090)
+    ap.add_argument("--product", default="JP21", help="the deck's product code: picks files/panel-CODE.json")
     ap.add_argument("--console", default="http://localhost:8080/", help="link to EngineX's web console")
     ap.add_argument("--forward", action="append", default=[], metavar="PORT=HOST:PORT",
                     help="forward a local TCP port into the deck's network namespace")
     ap.add_argument("--drives", default=os.path.join(HERE, "drives.txt"))
     a = ap.parse_args()
     emu = os.path.join(a.rootfs, "tmp/emu")
-    panel_json = open(os.path.join(HERE, "files", "panel.json")).read()
+    pf = os.path.join(HERE, "files", f"panel-{a.product}.json")
+    panel_json = open(pf if a.product != "JP21" and os.path.exists(pf) else os.path.join(HERE, "files", "panel.json")).read()
     frames = Frames(os.path.join(emu, "fb"))
     touch = Fifo(os.path.join(emu, "input"))
     surface = Surface(emu, json.loads(panel_json))

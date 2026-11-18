@@ -6,7 +6,11 @@
 # (a Lima VM).
 #
 #   sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]   build ./rootfs (once per firmware)
+#   sudo ./emu.sh product [JP21|JC11|JC11S]              which deck to be: SC LIVE 4 (default),
+#                                                        Prime 4 or Prime 4+ (same firmware)
 #   sudo ./emu.sh --profile NAME <command>               use a separate deck (e.g. a stock Engine OS one)
+#   sudo ./emu.sh profile new NAME [MODEL] | rename OLD NEW | delete NAME | model NAME [MODEL]
+#   ./emu.sh profiles                                    the decks: name, set up, EngineX, model, running
 #   sudo ./emu.sh install ENGINEX_BUNDLE                 (re)install EngineX into the rootfs
 #   sudo ./emu.sh start [--stock]                        boot it, open http://localhost:8090
 #                                                        (sudo EMU_NET=0 ./emu.sh start: no network)
@@ -49,6 +53,14 @@ NET_HOST_IF=emu0
 NET_HOST_IP=10.77.0.1
 NET_DECK_IP=10.77.0.2
 NET_DECK_MAC=02:4a:50:32:31:00
+
+# Which deck this profile is, by inMusic product code: JP21 SC LIVE 4, JC11 Prime 4, JC11S Prime 4+.
+# The SC LIVE 4's Engine OS 5.3.0 carries Engine's support for all of them; Engine picks its
+# product from the devicetree, which the emulator writes (prepare_rootfs).
+PRODUCTS="JP21 JC11 JC11S"
+product_name() { case "$1" in JP21) echo "SC LIVE 4" ;; JC11) echo "Prime 4" ;; JC11S) echo "Prime 4+" ;; *) echo "$1" ;; esac; }
+PRODUCT=$(cat "$STATE/product" 2>/dev/null || :)
+case " $PRODUCTS " in *" $PRODUCT "*) ;; *) PRODUCT=JP21 ;; esac
 
 die() { echo "emu: $*" >&2; exit 1; }
 say() { echo "emu: $*"; }
@@ -173,6 +185,18 @@ block_telemetry() {
 prepare_rootfs() {
     mkdir -p "$R/etc/emu" "$R/usr/bin"
     rm -rf "$R/sys" && tar -C "$R" -xzf "$HERE/files/fakesys.tar.gz"
+    printf %s "$PRODUCT" > "$R/sys/firmware/devicetree/base/inmusic,product-code"  # no newline, as on the unit
+    # RK3288 Prime decks check the board before Engine starts its UI (it quits to "TestApp" when
+    # this fails): the secure eFuse holds the product code, the CPU-id eFuse "RK3288" + board +
+    # product at byte 7. Contents as QEngine writes them (rootfs_steps/write_fake_dt.sh, MIT,
+    # Copyright (c) Peyton-C). The SC LIVE 4's stand-ins (fakesys) already pass, so they stay.
+    if [ "$PRODUCT" != JP21 ]; then
+        local ef=$R/sys/devices/platform
+        mkdir -p "$ef/ffb10000.efuse/rockchip-efuse0" "$ef/ffb40000.efuse/rockchip-efuse0"
+        { printf %s "$PRODUCT"; head -c $((128 - ${#PRODUCT})) /dev/zero; } > "$ef/ffb10000.efuse/rockchip-efuse0/nvmem"
+        { head -c 7 /dev/zero; printf %s "RK3288AZ01$PRODUCT"; head -c $((128 - 17 - ${#PRODUCT})) /dev/zero; } \
+            > "$ef/ffb40000.efuse/rockchip-efuse0/nvmem"
+    fi
     # Both names, so it works whichever path the kernel's binfmt entry was registered with.
     cp "$QEMU" "$R/usr/bin/qemu-arm-static"
     cp "$QEMU" "$R/usr/bin/qemu-arm"
@@ -479,7 +503,7 @@ cmd_start() {
     fi
     engine_loop $stock "$GL" </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
     local fwd=""; [ "$EMU_NET" = 1 ] && fwd="--forward $CONSOLE_PORT=$NET_DECK_IP:$CONSOLE_PORT"
-    python3 "$HERE/viewer.py" --rootfs "$R" --port "$VIEW_PORT" --console "http://localhost:$CONSOLE_PORT/" $fwd \
+    python3 "$HERE/viewer.py" --rootfs "$R" --product "$PRODUCT" --port "$VIEW_PORT" --console "http://localhost:$CONSOLE_PORT/" $fwd \
         < /dev/null > "$STATE/viewer.log" 2>&1 &
     echo $! > "$STATE/viewer.pid"
     # Don't report success unless the deck page is actually answering.
@@ -593,6 +617,8 @@ cmd_dump_qml() {
 cmd_info() {
     # Machine-readable state for the Windows app: key=value lines.
     echo "profile=${PROFILE:-default}"
+    echo "product=$PRODUCT"
+    echo "product_name=$(product_name "$PRODUCT")"
     [ -x "$R/usr/Engine/Engine" ] && echo "setup=yes" || echo "setup=no"
     if [ -f "$R/data/enginex/version.txt" ]; then echo "enginex=$(head -n1 "$R/data/enginex/version.txt")"; else echo "enginex="; fi
     running && echo "running=yes" || echo "running=no"
@@ -602,15 +628,93 @@ cmd_info() {
     echo "console_url=http://localhost:$CONSOLE_PORT/"
 }
 
+cmd_product() {
+    if [ -z "${1:-}" ]; then echo "$PRODUCT ($(product_name "$PRODUCT"))"; return; fi
+    local want; want=$(echo "$1" | tr a-z A-Z)
+    case " $PRODUCTS " in *" $want "*) ;; *) die "unknown product $1; one of: $PRODUCTS" ;; esac
+    need_root; mkdir -p "$STATE"; echo "$want" > "$STATE/product"
+    say "this deck is now: $(product_name "$want") ($want)$(running && echo '; restart it (reboot) to switch')"
+}
+
 cmd_profiles() {
-    # One line per deck: name <TAB> set up? <TAB> EngineX version
-    local d name
-    for d in "$HERE"/rootfs "$HERE"/rootfs-*; do
+    # One line per deck: name <TAB> set up? <TAB> EngineX version <TAB> model code <TAB> running?
+    # A deck exists once it has a rootfs (set up) or a state folder (made with "profile new").
+    local d name sfx code seen=" "
+    for d in "$HERE"/rootfs "$HERE"/rootfs-* "$HERE"/state "$HERE"/state-*; do
         [ -d "$d" ] || continue
-        name=${d##*/rootfs}; name=${name#-}; [ -n "$name" ] || name=default
-        printf '%s\t%s\t%s\n' "$name" "$([ -x "$d/usr/Engine/Engine" ] && echo yes || echo no)" \
-            "$(head -n1 "$d/data/enginex/version.txt" 2>/dev/null || :)"
+        case "$d" in "$HERE"/rootfs*) sfx=${d#"$HERE"/rootfs} ;; *) sfx=${d#"$HERE"/state} ;; esac
+        name=${sfx#-}; [ -n "$name" ] || name=default
+        case "$seen" in *" $name "*) continue ;; esac; seen="$seen$name "
+        code=$(cat "$HERE/state$sfx/product" 2>/dev/null || :)
+        case " $PRODUCTS " in *" $code "*) ;; *) code=JP21 ;; esac
+        printf '%s\t%s\t%s\t%s\t%s\n' "$name" \
+            "$([ -x "$HERE/rootfs$sfx/usr/Engine/Engine" ] && echo yes || echo no)" \
+            "$(head -n1 "$HERE/rootfs$sfx/data/enginex/version.txt" 2>/dev/null || :)" "$code" \
+            "$([ -f "$HERE/state$sfx/emu.pid" ] && kill -0 "$(cat "$HERE/state$sfx/emu.pid")" 2>/dev/null && echo yes || echo no)"
     done
+}
+
+# Managing decks. Each one is rootfs[-NAME]/ and state[-NAME]/ ("default" has no suffix).
+profile_name() {
+    case "$1" in
+        ""|*[!A-Za-z0-9_-]*) die "deck names are letters, digits, - and _" ;;
+    esac
+}
+profile_sfx() { [ "$1" = default ] && echo "" || echo "-$1"; }
+profile_exists() { local x; x=$(profile_sfx "$1"); [ -d "$HERE/rootfs$x" ] || [ -d "$HERE/state$x" ]; }
+profile_running() { local x; x=$(profile_sfx "$1"); [ -f "$HERE/state$x/emu.pid" ] && kill -0 "$(cat "$HERE/state$x/emu.pid")" 2>/dev/null; }
+# Stopped, with nothing of the host (drives, /dev, /proc) still mounted inside it.
+profile_quiet() {
+    local x r; x=$(profile_sfx "$1"); r=$HERE/rootfs$x
+    profile_running "$1" && die "deck $1 is running; stop it first"
+    if awk -v r="$r" 'index($2, r "/") == 1 || $2 == r {f=1} END {exit !f}' /proc/self/mounts; then
+        EMU_PROFILE=$1 EMU_ROOTFS= "$HERE/emu.sh" unmount >/dev/null 2>&1 || :
+        awk -v r="$r" 'index($2, r "/") == 1 || $2 == r {f=1} END {exit !f}' /proc/self/mounts &&
+            die "deck $1 still has folders mounted inside it; restart the computer (or WSL/VM) and try again"
+    fi
+    return 0
+}
+
+cmd_profile() {
+    local what=${1:-}; shift || :
+    case "$what" in
+        new)
+            local name=${1:-} model=${2:-JP21}
+            profile_name "$name"; need_root
+            profile_exists "$name" && die "there's already a deck called $name"
+            model=$(echo "$model" | tr a-z A-Z)
+            case " $PRODUCTS " in *" $model "*) ;; *) die "unknown model $model; one of: $PRODUCTS" ;; esac
+            mkdir -p "$HERE/state$(profile_sfx "$name")"
+            echo "$model" > "$HERE/state$(profile_sfx "$name")/product"
+            say "made deck $name ($(product_name "$model")); set it up with a firmware file" ;;
+        rename)
+            local old=${1:-} new=${2:-} a b
+            profile_name "$old"; profile_name "$new"; need_root
+            profile_exists "$old" || die "there's no deck called $old"
+            profile_exists "$new" && die "there's already a deck called $new"
+            profile_quiet "$old"
+            a=$(profile_sfx "$old"); b=$(profile_sfx "$new")
+            [ ! -d "$HERE/rootfs$a" ] || mv "$HERE/rootfs$a" "$HERE/rootfs$b"
+            [ ! -d "$HERE/state$a" ] || mv "$HERE/state$a" "$HERE/state$b"
+            say "renamed deck $old to $new" ;;
+        delete)
+            local name=${1:-} x
+            profile_name "$name"; need_root
+            profile_exists "$name" || die "there's no deck called $name"
+            profile_quiet "$name"
+            x=$(profile_sfx "$name")
+            # --one-file-system: never follow into anything that might still be mounted.
+            rm -rf --one-file-system "$HERE/rootfs$x" "$HERE/state$x"
+            say "deleted deck $name" ;;
+        model)
+            local name=${1:-} model=${2:-} x
+            profile_name "$name"
+            profile_exists "$name" || die "there's no deck called $name"
+            x=$(profile_sfx "$name")
+            [ -n "$model" ] || { cat "$HERE/state$x/product" 2>/dev/null || echo JP21; return; }
+            EMU_PROFILE= "$HERE/emu.sh" --profile "$name" product "$model" ;;
+        *) die "usage: ./emu.sh profile new NAME [MODEL] | rename OLD NEW | delete NAME | model NAME [MODEL]" ;;
+    esac
 }
 
 cmd_identify() {
@@ -699,6 +803,9 @@ case "${1:-}" in
     dump-qml) shift; cmd_dump_qml "$@" ;;
     info) cmd_info ;;
     profiles) cmd_profiles ;;
+    profile) shift; cmd_profile "$@" ;;
+    unmount) need_root; running && die "stop it first"; mounts_down ;;
+    product) shift; cmd_product "$@" ;;
     identify) shift; cmd_identify "$@" ;;
     graphics)
         shift

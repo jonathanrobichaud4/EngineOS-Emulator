@@ -67,10 +67,18 @@ struct DeckInfo: Hashable {
     var setUp: Bool
     var enginex: String
     var running: Bool
-    var label: String {
-        let what = !setUp ? "not set up" : (enginex.isEmpty ? "stock Engine OS" : "EngineX \(enginex)")
-        return "\(name) (\(what))" + (running ? " · running" : "")
-    }
+    var model: String = "JP21"
+    var what: String { !setUp ? "not set up" : (enginex.isEmpty ? "stock Engine OS" : "EngineX \(enginex)") }
+    var label: String { "\(name) (\(DeckModel.name(model)), \(what))" + (running ? ", running" : "") }
+}
+
+/// The deck models the emulator knows, by inMusic product code. Only the SC LIVE 4 boots so far.
+struct DeckModel: Hashable {
+    let code: String, name: String, ready: Bool
+    static let all = [DeckModel(code: "JP21", name: "SC LIVE 4", ready: true),
+                      DeckModel(code: "JC11", name: "Prime 4", ready: false),
+                      DeckModel(code: "JC11S", name: "Prime 4+", ready: false)]
+    static func name(_ code: String) -> String { all.first { $0.code == code }?.name ?? code }
 }
 
 // MARK: - Running the launcher
@@ -95,7 +103,6 @@ final class Model: ObservableObject {
         didSet { UserDefaults.standard.set(deck, forKey: "deck"); state = [:]; refresh() }
     }
     @Published var decks: [DeckInfo] = []
-    @Published var newDecks: [String] = []   // made here, not set up yet
 
     private var current: Process?
     private var follower: Process?
@@ -172,14 +179,22 @@ final class Model: ObservableObject {
             for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
                 if line.hasPrefix("deck=") {
                     let f = line.dropFirst(5).split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-                    if f.count >= 4 { ds.append(DeckInfo(name: f[0], setUp: f[1] == "yes", enginex: f[2], running: f[3] == "yes")) }
+                    if f.count >= 4 {
+                        ds.append(DeckInfo(name: f[0], setUp: f[1] == "yes", enginex: f[2], running: f[3] == "yes",
+                                           model: f.count >= 5 && !f[4].isEmpty ? f[4] : "JP21"))
+                    }
                 } else if let eq = line.firstIndex(of: "=") {
                     s[String(line[..<eq])] = String(line[line.index(after: eq)...])
                 }
             }
             DispatchQueue.main.async {
                 if !s.isEmpty { self.state = s }
-                if !ds.isEmpty { self.decks = ds; self.newDecks.removeAll { n in ds.contains { $0.name == n } } }
+                // The VM's own list (empty once every deck is deleted). If the selected deck is
+                // gone (renamed or deleted elsewhere), select the first one there is.
+                if s["vm"] == "Running" && s["profile"] != nil {
+                    self.decks = ds
+                    if !ds.isEmpty && !ds.contains(where: { $0.name == self.deck }) { self.deck = ds[0].name }
+                }
             }
         }
         try? p.run()
@@ -197,18 +212,13 @@ final class Model: ObservableObject {
 
     /// Every deck to offer: the VM's, ones made here, and the selected one.
     var deckChoices: [DeckInfo] {
-        var all = decks
-        if !all.contains(where: { $0.name == "default" }) { all.insert(DeckInfo(name: "default", setUp: false, enginex: "", running: false), at: 0) }
-        for n in newDecks + [deck] where !all.contains(where: { $0.name == n }) {
-            all.append(DeckInfo(name: n, setUp: false, enginex: "", running: false))
-        }
-        return all
+        decks.isEmpty ? [DeckInfo(name: deck, setUp: false, enginex: "", running: false)] : decks
     }
 
     /// Runs `engineos-emu [--profile DECK] args...`, streaming its output into the log. One at a time.
     /// Commands about the VM or the app itself don't take a deck.
     func run(_ args: [String], title: String, profile: String? = nil, done: ((Int32) -> Void)? = nil) {
-        let vmWide: Set<String> = ["install", "update", "vm-stop", "uninstall"]
+        let vmWide: Set<String> = ["install", "update", "vm-stop", "uninstall", "profile"]
         var pre = profileArgs
         if let p = profile { pre = p == "default" ? [] : ["--profile", p] }
         let full = (args.first.map { vmWide.contains($0) } ?? false) ? args : pre + args
@@ -273,24 +283,102 @@ final class Model: ObservableObject {
         startSelected()
     }
 
+    // MARK: managing decks (emu.sh profile new / rename / delete / model)
+
+    static let deckNamePattern = "^[A-Za-z0-9_-]+$"
+
+    private func validName(_ name: String, except old: String? = nil) -> Bool {
+        guard name.range(of: Model.deckNamePattern, options: .regularExpression) != nil else {
+            alert("Deck names are letters, digits, - and _ only."); return false
+        }
+        if name != old, deckChoices.contains(where: { $0.name == name }) { alert("There's already a deck called \(name)."); return false }
+        return true
+    }
+
+    private func alert(_ text: String) {
+        let a = NSAlert(); a.messageText = text; a.runModal()
+    }
+
+    /// A popup of the models; the ones that don't boot yet are shown but can't be picked.
+    static func modelPopup(selected: String) -> NSPopUpButton {
+        let pop = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
+        pop.autoenablesItems = false
+        for d in DeckModel.all {
+            pop.addItem(withTitle: d.ready ? d.name : "\(d.name) (coming later)")
+            pop.lastItem?.representedObject = d.code
+            pop.lastItem?.isEnabled = d.ready
+        }
+        pop.selectItem(at: DeckModel.all.firstIndex { $0.code == selected } ?? 0)
+        return pop
+    }
+
     func newDeck() {
         let a = NSAlert()
         a.messageText = "New deck"
-        a.informativeText = "A name for it (letters, digits, - and _), for example \"stock\". Then drop a firmware file on the window to set it up, with or without EngineX."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = "stock"
-        a.accessoryView = field
+        a.informativeText = "A name (letters, digits, - and _) and which deck it is. Then drop a firmware file on the window to set it up, with or without EngineX."
+        let field = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
+        field.stringValue = deckChoices.contains { $0.name == "stock" } ? "" : "stock"
+        field.placeholderString = "name"
+        let pop = Model.modelPopup(selected: "JP21")
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 58))
+        box.addSubview(field); box.addSubview(pop)
+        a.accessoryView = box
         a.addButton(withTitle: "Create")
         a.addButton(withTitle: "Cancel")
         a.window.initialFirstResponder = field
         guard a.runModal() == .alertFirstButtonReturn else { return }
         let name = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else {
-            append("Deck names are letters, digits, - and _ only.\n"); return
+        guard validName(name) else { return }
+        let code = pop.selectedItem?.representedObject as? String ?? "JP21"
+        run(["profile", "new", name, code], title: "Making the \(name) deck") { code in
+            if code == 0 { self.deck = name }
+            self.refresh()
         }
-        if !deckChoices.contains(where: { $0.name == name }) { newDecks.append(name) }
-        deck = name
-        append("New deck \"\(name)\": drop a firmware file on the window to set it up (add an EngineX bundle after, or leave it stock).\n")
+    }
+
+    func renameDeck(_ d: DeckInfo) {
+        guard !d.running else { alert("Stop the \(d.name) deck before renaming it."); return }
+        let a = NSAlert()
+        a.messageText = "Rename \"\(d.name)\""
+        a.informativeText = "Letters, digits, - and _."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = d.name
+        a.accessoryView = field
+        a.addButton(withTitle: "Rename")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = field
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard name != d.name, validName(name, except: d.name) else { return }
+        run(["profile", "rename", d.name, name], title: "Renaming \(d.name) to \(name)") { code in
+            if code == 0 && self.deck == d.name { self.deck = name }
+            self.refresh()
+        }
+    }
+
+    func deleteDeck(_ d: DeckInfo) {
+        guard !d.running else { alert("Stop the \(d.name) deck before deleting it."); return }
+        let a = NSAlert()
+        a.alertStyle = .warning
+        a.messageText = "Delete the \(d.name) deck?"
+        a.informativeText = "This deletes its firmware copy, Engine settings, library and installed mods. Your music and drive folders aren't touched."
+        a.addButton(withTitle: "Delete")
+        a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        run(["profile", "delete", d.name], title: "Deleting the \(d.name) deck") { code in
+            if code == 0 && self.deck == d.name {
+                self.deck = self.decks.first { $0.name != d.name }?.name ?? "default"
+            }
+            self.refresh()
+        }
+    }
+
+    func setModel(_ d: DeckInfo, _ code: String) {
+        guard code != d.model else { return }
+        guard DeckModel.all.first(where: { $0.code == code })?.ready ?? false else {
+            alert("\(DeckModel.name(code)) support isn't ready yet. For now every deck is an SC LIVE 4."); return
+        }
+        run(["profile", "model", d.name, code], title: "Setting \(d.name) to \(DeckModel.name(code))") { _ in self.refresh() }
     }
 
     private func startSelected() {
@@ -584,6 +672,7 @@ final class Model: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject var m: Model
     @State private var dropping = false
+    @State private var showDecks = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -598,6 +687,8 @@ struct ContentView: View {
         }
         .padding(16)
         .onAppear { m.launch() }
+        .sheet(isPresented: $showDecks) { DecksView().environmentObject(m) }
+        .onReceive(NotificationCenter.default.publisher(for: .manageDecks)) { _ in showDecks = true }
     }
 
     var header: some View {
@@ -618,8 +709,8 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: 300)
                 .disabled(m.busy)
-                Button { m.newDeck() } label: { Image(systemName: "plus") }
-                    .help("New deck")
+                Button { showDecks = true } label: { Image(systemName: "slider.horizontal.3") }
+                    .help("Manage decks: add, rename, delete, choose the model")
                     .disabled(m.busy)
             }
         }
@@ -717,6 +808,58 @@ struct ContentView: View {
     }
 }
 
+extension Notification.Name { static let manageDecks = Notification.Name("manageDecks") }
+
+/// Add, rename and delete decks, and pick each one's model.
+struct DecksView: View {
+    @EnvironmentObject var m: Model
+    @Environment(\.dismiss) var dismiss
+    @State private var picked: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Decks").font(.title3.bold())
+            Text("Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            List(selection: $picked) {
+                ForEach(m.deckChoices, id: \.name) { d in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(d.name).bold()
+                            Text(d.what + (d.running ? ", running" : "")).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Picker("", selection: Binding(get: { d.model }, set: { m.setModel(d, $0) })) {
+                            ForEach(DeckModel.all, id: \.code) { x in
+                                Text(x.ready ? x.name : "\(x.name) (coming later)").tag(x.code)
+                            }
+                        }
+                        .labelsHidden().frame(width: 190)
+                        .disabled(m.busy || d.running)
+                    }
+                    .tag(d.name)
+                }
+            }
+            .frame(minHeight: 180)
+            HStack {
+                Button("Add...") { m.newDeck() }
+                Button("Rename...") { if let d = sel { m.renameDeck(d) } }.disabled(sel == nil)
+                Button("Delete...") { if let d = sel { m.deleteDeck(d) } }.disabled(sel == nil)
+                Spacer()
+                if m.busy { ProgressView().controlSize(.small); Text(m.task).foregroundStyle(.secondary).lineLimit(1) }
+                Button("Use This Deck") { if let d = sel { m.deck = d.name }; dismiss() }.disabled(sel == nil)
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .disabled(m.busy)
+        }
+        .padding(16)
+        .frame(width: 560, height: 380)
+        .onAppear { picked = m.deck; m.refresh() }
+    }
+
+    private var sel: DeckInfo? { m.deckChoices.first { $0.name == picked } }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var m: Model
     var body: some View {
@@ -778,6 +921,9 @@ struct EngineOSEmulatorApp: App {
                     .keyboardShortcut("o")
             }
             CommandMenu("Deck") {
+                Button("Manage Decks...") { NotificationCenter.default.post(name: .manageDecks, object: nil) }
+                    .keyboardShortcut("k").disabled(model.busy)
+                Divider()
                 Button("Start") { model.start() }.keyboardShortcut("r").disabled(model.busy || !model.isSetUp || model.running)
                 Button("Stop") { model.stop() }.keyboardShortcut(".").disabled(model.busy || !model.running)
                 Button("Reboot") { model.reboot() }.disabled(model.busy || !model.running)

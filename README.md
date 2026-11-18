@@ -29,7 +29,7 @@ Not emulated yet:
 
 - It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/engineos-emulator` in Ubuntu), and finds an older copy and moves your deck over.
 - **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\EngineOS Emulator`, which is plugged in as the EMULATOR drive.
-- Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
+- Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker and a **Decks...** window to add, rename and delete decks and choose each one's model (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
 
 Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler).
 
@@ -113,6 +113,18 @@ sudo ./emu.sh --profile stock start
 ```
 
 Every command takes `--profile NAME` (`stop`, `status`, `drive`, `shell` and so on). Without it you get the default deck in `rootfs/`. One deck runs at a time. `start --stock` is different: it runs the EngineX deck with EngineX's hook switched off, but EngineX's files are still installed.
+
+Managing decks:
+
+```sh
+sudo ./emu.sh profile new stock            # an empty deck (then set it up as above)
+sudo ./emu.sh profile rename stock plain   # the deck has to be stopped
+sudo ./emu.sh profile delete plain         # deletes its rootfs and state; drive folders aren't touched
+sudo ./emu.sh profile model plain JP21     # which deck it is (JP21 SC LIVE 4; Prime 4 JC11 and Prime 4+ JC11S don't boot yet)
+./emu.sh profiles                          # name, set up, EngineX version, model, running
+```
+
+The Mac and Windows apps do the same from their **Decks** window (Cmd+K on a Mac).
 
 ### Drives
 
