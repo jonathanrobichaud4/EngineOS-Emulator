@@ -58,6 +58,7 @@ final class Model: ObservableObject {
         var e = ProcessInfo.processInfo.environment
         e["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         e["NO_COLOR"] = "1"
+        e["SCLIVE4_NO_OPEN"] = "1"   // the app opens the deck page itself, once
         return e
     }
 

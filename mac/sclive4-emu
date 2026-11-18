@@ -104,7 +104,8 @@ start)
     need_vm
     # In its own session, so the deck keeps running when this command's SSH session to the VM ends.
     if [ -n "$PROFILE" ]; then set -- --profile "$PROFILE" start "$@"; else set -- start "$@"; fi
-    vm sudo setsid -w "$EMU" "$@" </dev/null && { say "deck: $DECK_URL"; open "$DECK_URL"; }
+    # The Mac app sets SCLIVE4_NO_OPEN: it opens the page itself (or not, per its setting).
+    vm sudo setsid -w "$EMU" "$@" </dev/null && { say "deck: $DECK_URL"; [ -n "${SCLIVE4_NO_OPEN:-}" ] || open "$DECK_URL"; }
     ;;
 enginex|mod-install)
     [ $# -ge 1 ] || die "usage: sclive4-emu $cmd FILE.tar.gz"
