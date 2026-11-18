@@ -1,10 +1,17 @@
-# A numbered release with both apps: push a tag like v1.0.0 and this builds the Mac and Windows
-# apps from that commit and publishes them as the release for that tag. (The rolling mac-app and
+# A numbered release with both apps: run this workflow from GitHub's Actions tab (Run workflow,
+# then a version like v1.0.0), or push a tag like v1.0.0. It builds the Mac and Windows apps from
+# that commit and publishes them as the release for that version, creating the tag. (The rolling mac-app and
 # windows-app releases, which the apps update themselves from, are built by their own workflows.)
 name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, like v1.0.0"
+        required: true
+        default: "v1.0.0"
 permissions:
   contents: write
 jobs:
@@ -32,7 +39,7 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           cat > notes.md <<NOTES
           SC LIVE 4 Emulator apps, built from ${GITHUB_SHA::7}.
@@ -42,5 +49,5 @@ jobs:
 
           Both apps update themselves from the rolling mac-app and windows-app releases (an option in their settings), and update the emulator itself from the repository.
           NOTES
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "SC LIVE 4 Emulator $TAG" --notes-file notes.md \
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "SC LIVE 4 Emulator $TAG" --notes-file notes.md \
             mac/SCLive4Emulator-mac.zip windows/SCLive4Emulator.exe
