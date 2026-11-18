@@ -108,6 +108,9 @@ deps() {
     command -v virgl_test_server >/dev/null || miss+=(virgl-server)
     # virgl draws with the host's Mesa (llvmpipe when there's no GPU, as in a VM). A minimal
     # Ubuntu, such as Lima's cloud image on a Mac, may have no Mesa EGL or DRI drivers at all.
+    # libEGL.so.1 itself (glvnd's loader) is its own package; without it virgl_test_server
+    # starts but can't open EGL, and drops every client.
+    dpkg -s libegl1 >/dev/null 2>&1 || miss+=(libegl1)
     dpkg -s libegl-mesa0 >/dev/null 2>&1 || miss+=(libegl-mesa0)
     dpkg -s libgl1-mesa-dri >/dev/null 2>&1 || miss+=(libgl1-mesa-dri)
     if [ ${#miss[@]} -gt 0 ]; then
