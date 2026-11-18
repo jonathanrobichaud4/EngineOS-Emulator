@@ -18,7 +18,7 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          if ! windows/build.sh > build.log 2>&1; then
+          if ! BUILD_COMMIT=${{ github.sha }} windows/build.sh > build.log 2>&1; then
             cat build.log
             grep -E '\(([0-9]+),([0-9]+)\): error ' build.log | head -30 |
               sed -E 's/^([^(]+)\(([0-9]+),([0-9]+)\): error (.*)$/::error file=windows\/\1,line=\2,col=\3::\4/' || true
@@ -36,3 +36,6 @@ jobs:
           gh release view windows-app >/dev/null 2>&1 ||
             gh release create windows-app --title "Windows app" --notes "The SC LIVE 4 Emulator app for Windows 10 and 11 (runs the emulator in WSL), built from main. Download SCLive4Emulator.exe and run it. Windows may warn the first time because it isn't signed: More info, then Run anyway."
           gh release upload windows-app windows/SCLive4Emulator.exe --clobber
+          # Last, so an app that sees the new version can already download it.
+          echo "${{ github.sha }}" > version.txt
+          gh release upload windows-app version.txt --clobber

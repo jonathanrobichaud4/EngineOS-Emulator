@@ -20,6 +20,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -545,6 +546,7 @@ namespace SCLive4Emulator
         async Task Init()
         {
             ActionsEnabled(false);
+            if (Option("AutoUpdateApp", true)) _ = CheckAppUpdate(false);
             if (!Wsl.Installed)
             {
                 ShowSetup("WSL isn't installed. The emulator runs in WSL (Windows Subsystem for Linux), so that comes first. " +
@@ -786,6 +788,7 @@ namespace SCLive4Emulator
                 await UpdateEmulator(false);
                 SetBusy(false);
             });
+            m.Items.Add("Check for app updates", null, async (s, e) => await CheckAppUpdate(true));
             m.Items.Add("Open music folder", null, (s, e) => OpenUrl(Settings.MusicFolder));
             m.Items.Add(new ToolStripSeparator());
             var auto = new ToolStripMenuItem("Start the deck when the app opens") { Checked = Option("AutoStart", false), CheckOnClick = true };
@@ -802,11 +805,71 @@ namespace SCLive4Emulator
                 await wsl.Run(wsl.Emu(CurrentProfile, "graphics " + (sw.Checked ? "software" : "auto")), Log);
                 Log("Restart the deck for this to take effect.");
             };
+            var updApp = new ToolStripMenuItem("Update this app automatically") { Checked = Option("AutoUpdateApp", true), CheckOnClick = true };
+            updApp.CheckedChanged += (s, e) => SetOption("AutoUpdateApp", updApp.Checked);
             m.Items.Add(auto);
             m.Items.Add(upd);
+            m.Items.Add(updApp);
             m.Items.Add(sw);
             m.Items.Add(open);
             m.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        // The app itself is published as the "windows-app" release, with version.txt holding the
+        // commit it was built from (BuildInfo.Commit, set by windows/build.sh). A different commit
+        // there means a newer build: download it next to this one, and once this app has quit, a
+        // small batch file moves it into place and starts it. Local builds ("dev") never update.
+        const string AppRelease = "https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/";
+
+        async Task CheckAppUpdate(bool manual)
+        {
+            if (BuildInfo.Commit == "dev")
+            {
+                if (manual) Log("This is a local build (not from the release), so it doesn't update itself.");
+                return;
+            }
+            try
+            {
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                string latest;
+                using (var wc = new WebClient())
+                {
+                    wc.Headers[HttpRequestHeader.CacheControl] = "no-cache";
+                    latest = (await wc.DownloadStringTaskAsync(AppRelease + "version.txt")).Trim();
+                }
+                if (latest.Length < 7) { if (manual) Log("Couldn't read the latest app version."); return; }
+                if (latest == BuildInfo.Commit) { if (manual) Log("The app is up to date (build " + latest.Substring(0, 7) + ")."); return; }
+
+                string exe = Application.ExecutablePath, dir = Path.GetDirectoryName(exe);
+                string fresh = Path.Combine(dir, "SCLive4Emulator.update.exe");
+                try { File.WriteAllText(fresh, ""); }
+                catch
+                {
+                    Log("A new app version is out, but this folder isn't writable (" + dir + "). Download it from the Windows app release on GitHub.");
+                    return;
+                }
+                Log("Downloading the new app (build " + latest.Substring(0, 7) + ")...");
+                using (var wc = new WebClient()) await wc.DownloadFileTaskAsync(AppRelease + "SCLive4Emulator.exe", fresh);
+                if (new FileInfo(fresh).Length < 20000) { File.Delete(fresh); Log("The app download looked wrong; skipped."); return; }
+
+                string pid = Process.GetCurrentProcess().Id.ToString();
+                string bat = Path.Combine(Path.GetTempPath(), "sclive4-emulator-update.cmd");
+                File.WriteAllText(bat,
+                    "@echo off\r\n" +
+                    ":wait\r\n" +
+                    "tasklist /FI \"PID eq " + pid + "\" 2>nul | find \"" + pid + "\" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n" +
+                    "move /y \"" + fresh + "\" \"" + exe + "\" >nul\r\n" +
+                    "start \"\" \"" + exe + "\"\r\n" +
+                    "del \"%~f0\"\r\n");
+                Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + bat + "\"") { CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, UseShellExecute = false });
+                Log("Restarting with the new app...");
+                await Task.Delay(800);
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                if (manual) Log("Couldn't check for app updates: " + ex.Message);
+            }
         }
 
         // Brings the emulator in WSL up to date with GitHub. The copy this app installed in /opt is the
