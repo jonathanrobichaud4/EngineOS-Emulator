@@ -37,9 +37,8 @@ jobs:
           gh release view windows-app >/dev/null 2>&1 || gh release create windows-app --title "Windows app" --notes "$NOTES"
           gh release edit windows-app --notes "$NOTES"
           gh release upload windows-app windows/EngineOSEmulator.exe --clobber
-          # Apps from before the rename (SC LIVE 4 Emulator) download the old name to update.
-          cp windows/EngineOSEmulator.exe SCLive4Emulator.exe
-          gh release upload windows-app SCLive4Emulator.exe --clobber
+          # The download from before the rename to EngineOS Emulator.
+          gh release delete-asset windows-app SCLive4Emulator.exe -y 2>/dev/null || true
           # Last, so an app that sees the new version can already download it.
           echo "${{ github.sha }}" > version.txt
           gh release upload windows-app version.txt --clobber

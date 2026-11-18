@@ -50,9 +50,8 @@ jobs:
           gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --title "Mac app" --notes "$NOTES"
           gh release edit mac-app --notes "$NOTES"
           gh release upload mac-app EngineOSEmulator-mac.zip --clobber
-          # Apps from before the rename (SC LIVE 4 Emulator) download the old name to update.
-          cp EngineOSEmulator-mac.zip SCLive4Emulator-mac.zip
-          gh release upload mac-app SCLive4Emulator-mac.zip --clobber
+          # The download from before the rename to EngineOS Emulator.
+          gh release delete-asset mac-app SCLive4Emulator-mac.zip -y 2>/dev/null || true
           # Last, so an app that sees the new version can already download it.
           echo "${{ github.sha }}" > version.txt
           gh release upload mac-app version.txt --clobber
