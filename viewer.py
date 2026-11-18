@@ -118,6 +118,7 @@ class Surface:
             elif t == "jog":
                 self.values[c["id"]] = 0
         self.leds = {}
+        self.jog = {}  # per MIDI channel: the jog display's time and BPM
         self.seq = 0
         self.cond = threading.Condition()
         threading.Thread(target=self.follow, daemon=True).start()
@@ -199,6 +200,7 @@ class Surface:
                 ino, pos = st.st_ino, 0
                 with self.cond:
                     self.leds.clear()
+                    self.jog.clear()
             if st.st_size == pos:
                 time.sleep(0.03)
                 continue
@@ -221,6 +223,16 @@ class Surface:
                     changed = True
                 elif b[0] == 0xF0 and b[1:7] == [0x00, 0x02, 0x0B, 0x7F, 0x12, 0x04]:
                     threading.Thread(target=self.replay, daemon=True).start()
+                elif b[0] == 0xF0 and b[1:4] == [0x00, 0x02, 0x0B] and len(b) >= 8 and b[4] < 0x10:
+                    # The jog display's digits (LcdWheelDisplay.qml): F0 00 02 0B <ch> 00|01 h m s cs F7
+                    # is the time (01: counting down), F0 00 02 0B <ch> 02 <6 hex nibbles> F7 the BPM x 100.
+                    j = self.jog.setdefault(str(b[4]), {})
+                    if b[5] in (0, 1) and len(b) >= 11:
+                        j["time"] = {"minus": b[5] == 1, "h": b[6], "m": b[7], "s": b[8], "cs": b[9]}
+                        changed = True
+                    elif b[5] == 2 and len(b) >= 13:
+                        j["bpm"] = int("".join(f"{x & 0xF:x}" for x in b[6:12]), 16) / 100
+                        changed = True
             if changed:
                 with self.cond:
                     self.seq += 1
@@ -229,7 +241,8 @@ class Surface:
     def state(self, since, timeout=2.0):
         with self.cond:
             self.cond.wait_for(lambda: self.seq != since, timeout)
-            return {"seq": self.seq, "leds": dict(self.leds), "values": dict(self.values)}
+            return {"seq": self.seq, "leds": dict(self.leds), "values": dict(self.values),
+                    "jog": {k: dict(v) for k, v in self.jog.items()}}
 
 
 # ------------------------------------------------------------------------------ audio

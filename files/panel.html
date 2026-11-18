@@ -43,6 +43,7 @@ header a{color:#8bb8ff;text-decoration:none}
 .jog .mark{position:absolute;left:50%;top:2%;width:4px;height:12%;margin-left:-2px;background:#e8eaed;border-radius:2px;transform-origin:50% 400%}
 .jog .info{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#9aa0a8;font-size:14px;font-weight:600;pointer-events:none}
 .jog.touched .top{box-shadow:inset 0 0 0 3px #4aa3ff}
+.jog canvas.lcd{position:absolute;inset:18%;width:64%;height:64%;border-radius:50%;pointer-events:none}
 .sw{display:flex;border-radius:4px;overflow:hidden;border:1px solid #1d1f22;background:#1a1c1f}
 .sw div{flex:1;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:#8a9097;cursor:pointer}
 .sw div.on{background:#5a5f66;color:#fff}
@@ -186,7 +187,8 @@ const builders={
   const set=nv=>{nv=Math.max(0,Math.min(127,Math.round(nv)));if(nv!==v){v=nv;show();send(`${c.id} set ${v}`)}};
   drag(d,(e,dx)=>set(v+dx*127/(c.w-26)));d.addEventListener("dblclick",()=>set(64));
   views[c.id]={value(nv){v=nv;show()}}},
- jog(c){const d=el(c,"jog");d.innerHTML='<div class="top"></div><div class="mark"></div><div class="info"><span>'+c.lab+'</span></div>';
+ jog(c){const d=el(c,"jog");d.innerHTML='<div class="top"></div><canvas class="lcd" width="320" height="320"></canvas><div class="mark"></div><div class="info"><span>'+c.lab+'</span></div>';
+  const lcd=d.querySelector("canvas.lcd"),info=d.querySelector(".info");
   const mark=d.querySelector(".mark"),TPR=2048;let pos=0,touching=false;
   const show=()=>mark.style.transform=`rotate(${pos/TPR*360}deg)`;
   const ang=e=>{const r=d.getBoundingClientRect();return Math.atan2(e.clientY-(r.top+r.height/2),e.clientX-(r.left+r.width/2))};
@@ -197,7 +199,7 @@ const builders={
       touching=Math.hypot(dx,dy)<r.width*0.34;if(touching){d.classList.add("touched");send(c.id+" press")}},
     ()=>{if(touching){touching=false;d.classList.remove("touched");send(c.id+" release")}});
   d.addEventListener("wheel",e=>{e.preventDefault();const n=e.deltaY<0?24:-24;pos+=n;show();send(`${c.id} spin ${n}`)},{passive:false});
-  views[c.id]={}},
+  views[c.id]={jog(st){const on=drawJogLcd(lcd,c.ch,st);info.style.display=on?"none":"flex"}}},
  sw(c){const d=el(c,"sw");label(d,c.labs?"":c.lab);
   const parts=c.labs.map((t,i)=>{const p=document.createElement("div");p.textContent=t;p.onclick=()=>{set(i)};d.appendChild(p);return p});
   let v=values[c.id]??c.d??0;const show=()=>parts.forEach((p,i)=>p.classList.toggle("on",i===v));show();
@@ -230,15 +232,57 @@ function vfader(c,max,topIsMax){const d=el(c);const tr=document.createElement("d
   views[c.id]=Object.assign(views[c.id]||{},{value(nv){v=nv;show()}})}
 function mix(hex,a){const n=parseInt(hex.slice(1),16),r=n>>16,g=(n>>8)&255,b=n&255,k=x=>Math.round(0x3a+(x-0x3a)*a);return`rgb(${k(r)},${k(g)},${k(b)})`}
 
+// ---------------------------------------------------------------- jog displays
+// The SC LIVE 4's jog centres are segment LCDs that Engine drives over MIDI
+// (ControlSurfaceModules/LcdWheelDisplay.qml), on the deck's channel:
+//   CC 0x30 position ring: 1-48 lights that segment, +64 inverts (all but that one), 0 off
+//   CC 0x31-0x34 ring quadrants top/right/left/bottom, 0x35/0x36 top/bottom box, 0x37 "DECK",
+//   0x39 "BPM", 0x3a time label, 0x3c dividing line, 0x3e BPM digits, 0x3f time digits
+//   note 0x38: the active deck number as velocity; the time and BPM come as SysEx (viewer.py).
+let jogs={};
+const LCD_ON="#e9f1ff",LCD_DIM="#1b2027";
+function drawJogLcd(cv,ch,st){
+  const L=k=>leds[`c${ch}.${k}`]||0,g=cv.getContext("2d"),W=cv.width,R=W/2;
+  const needle=L(0x30),any=needle||L(0x31)||L(0x35)||L(0x37)||L(0x3e)||L(0x3f);
+  g.clearRect(0,0,W,W);
+  if(!any)return false;
+  g.save();g.translate(R,R);
+  g.fillStyle="#05070a";g.beginPath();g.arc(0,0,R,0,7);g.fill();
+  // position ring, 48 segments from 12 o'clock clockwise
+  const seg=needle&63,inv=needle>=64,N=48;
+  for(let i=1;i<=N;i++){
+    const lit=needle?(inv?i!==seg:i===seg):false;
+    const a0=-Math.PI/2+(i-1)/N*2*Math.PI+0.012,a1=a0+2*Math.PI/N-0.024;
+    g.strokeStyle=lit?LCD_ON:LCD_DIM;g.lineWidth=R*0.09;g.beginPath();g.arc(0,0,R*0.9,a0,a1);g.stroke()}
+  // inner ring quadrants
+  const quad=[[0x31,-Math.PI*0.75],[0x32,-Math.PI*0.25],[0x34,Math.PI*0.25],[0x33,Math.PI*0.75]];
+  for(const[k,a]of quad){g.strokeStyle=L(k)?LCD_ON:LCD_DIM;g.lineWidth=R*0.025;g.beginPath();g.arc(0,0,R*0.76,a+0.04,a+Math.PI/2-0.04);g.stroke()}
+  g.textAlign="center";g.textBaseline="middle";g.fillStyle=LCD_ON;g.strokeStyle=LCD_ON;
+  // top box: DECK and the deck number
+  if(L(0x35)){g.lineWidth=R*0.02;g.strokeRect(-R*0.36,-R*0.62,R*0.72,R*0.5)}
+  if(L(0x37)){g.font=`600 ${R*0.11}px system-ui,sans-serif`;g.fillText("DECK",0,-R*0.52)}
+  const deck=leds[`n${ch}.56`];if(deck){g.font=`700 ${R*0.3}px system-ui,sans-serif`;g.fillText(String(deck),0,-R*0.28)}
+  if(L(0x3c)){g.lineWidth=R*0.02;g.beginPath();g.moveTo(-R*0.6,-R*0.04);g.lineTo(R*0.6,-R*0.04);g.stroke()}
+  // BPM
+  if(L(0x3e)&&st&&st.bpm!=null){g.font=`700 ${R*0.17}px ui-monospace,Menlo,Consolas,monospace`;g.fillText(st.bpm.toFixed(1),-R*0.08,R*0.12)}
+  if(L(0x39)||L(0x3e)){g.font=`600 ${R*0.08}px system-ui,sans-serif`;g.fillText("BPM",R*0.4,R*0.14)}
+  // time, bottom box
+  if(L(0x36)){g.lineWidth=R*0.02;g.strokeRect(-R*0.42,R*0.26,R*0.84,R*0.26)}
+  if(L(0x3f)&&st&&st.time){const t=st.time,m=t.h*60+t.m;
+    g.font=`700 ${R*0.15}px ui-monospace,Menlo,Consolas,monospace`;
+    g.fillText(`${t.minus?"-":""}${m}:${String(t.s).padStart(2,"0")}.${Math.floor(t.cs/10)}`,0,R*0.39)}
+  g.restore();return true}
+
 // ---------------------------------------------------------------- LEDs and values from the server
 function applyLeds(){
   for(const c of P.controls){if(!c.id)continue;const v=views[c.id];if(!v)continue;
     if(v.led){const key=c.t==="enc"?`n${c.ch}.${c.push}`:`n${c.ch}.${c.n}`;v.led(leds[key]||0)}
     if(v.cc)v.cc(leds[`c${c.ch}.${c.cc}`]||0);
-    if(c.t==="pitch"&&views[c.id+"#led"]){views[c.id+"#led"].style.background=leds[`n${c.ch}.${c.led}`]?"#ff4b3e":"#222"}}}
+    if(c.t==="pitch"&&views[c.id+"#led"]){views[c.id+"#led"].style.background=leds[`n${c.ch}.${c.led}`]?"#ff4b3e":"#222"}
+    if(v.jog)v.jog(jogs[String(c.ch)])}}
 async function stateLoop(){let seq=-1,first=true;
   for(;;){try{const r=await fetch("/state?since="+seq,{cache:"no-store"});const s=await r.json();
-      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}applyLeds()}}
+      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;jogs=s.jog||{};if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}applyLeds()}}
     catch(e){await new Promise(r=>setTimeout(r,1000))}}}
 
 // ---------------------------------------------------------------- screen
