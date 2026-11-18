@@ -27,17 +27,27 @@ jobs:
           cat build.log
           grep -E ': warning: ' build.log | head -20 |
             sed -E 's/^([^:]+):([0-9]+):([0-9]+): warning: (.*)$/::warning file=\1,line=\2,col=\3::\4/' || true
+      # Package first: the screenshot run below opens the app, and nothing it does may end up
+      # in the published zip.
+      - name: Package
+        run: |
+          ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
+          # The zip has to hold this build, not anything older.
+          unzip -p EngineOSEmulator-mac.zip "EngineOS Emulator.app/Contents/Info.plist" | grep -q "<string>${GITHUB_SHA::7}</string>" ||
+            { echo "::error::the packaged app isn't build ${GITHUB_SHA::7}"; exit 1; }
       - name: Screenshot
         continue-on-error: true
         run: |
-          open "build/EngineOS Emulator.app"
+          # A copy of the app to look at, with self-update off: left on, it would see the older
+          # version.txt on the release and replace itself with the old download.
+          defaults write io.github.jonathanrobichaud4.engineos-emulator autoUpdateApp -bool false
+          ditto "build/EngineOS Emulator.app" "$RUNNER_TEMP/EngineOS Emulator.app"
+          open "$RUNNER_TEMP/EngineOS Emulator.app"
           sleep 8
           osascript -e 'tell application "System Events" to set frontmost of (first process whose name is "EngineOSEmulator") to true' || true
           sleep 2
           screencapture -x screenshot.png
           pkill -x EngineOSEmulator || true
-      - name: Package
-        run: ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
       - uses: actions/upload-artifact@v4
         with:
           name: EngineOSEmulator-mac
