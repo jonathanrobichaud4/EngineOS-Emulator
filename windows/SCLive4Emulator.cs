@@ -1,7 +1,8 @@
 // SC LIVE 4 Emulator for Windows: a window for the emulator that runs in WSL.
 //
 // Drop files on it instead of typing commands:
-//   firmware .img          sets up the selected deck (stock Engine OS)
+//   firmware .img          sets up the selected deck (stock Engine OS); inMusic's updater
+//                          .exe or .zip works too
 //   EngineX bundle/.img    installs EngineX on it
 //   mod .tar.gz            installs and enables the mod (deck running)
 //   folder                 plugs in as a USB drive (hold Shift for the SD card)
@@ -718,7 +719,7 @@ namespace SCLive4Emulator
                 }
                 info = d;
                 bool setup = Get("setup", "no") == "yes", running = Get("running", "no") == "yes";
-                string sys = !setup ? "not set up: drop a firmware .img here"
+                string sys = !setup ? "not set up: drop the firmware .img or updater here"
                            : Get("enginex", "").Length > 0 ? "EngineX " + Get("enginex", "") : "stock Engine OS";
                 string state = !running ? "stopped" : Get("engine", "down") == "up" ? "running" : "starting";
                 if (!busy) statusLabel.Text = sys + "  |  " + state + (running && Get("ip", "").Length > 0 ? "  |  deck " + Get("ip", "") : "");
@@ -793,8 +794,17 @@ namespace SCLive4Emulator
             open.CheckedChanged += (s, e) => SetOption("OpenDeck", open.Checked);
             var upd = new ToolStripMenuItem("Update the emulator when the app opens") { Checked = Option("AutoUpdate", true), CheckOnClick = true };
             upd.CheckedChanged += (s, e) => SetOption("AutoUpdate", upd.Checked);
+            // OpenGL through virgl is the default; this is the way back if it misbehaves on a PC.
+            var sw = new ToolStripMenuItem("Software rendering (if the screen looks wrong)") { Checked = Option("SoftwareRender", false), CheckOnClick = true };
+            sw.CheckedChanged += async (s, e) =>
+            {
+                SetOption("SoftwareRender", sw.Checked);
+                await wsl.Run(wsl.Emu(CurrentProfile, "graphics " + (sw.Checked ? "software" : "auto")), Log);
+                Log("Restart the deck for this to take effect.");
+            };
             m.Items.Add(auto);
             m.Items.Add(upd);
+            m.Items.Add(sw);
             m.Items.Add(open);
             m.Show(anchor, new Point(0, anchor.Height));
         }
@@ -892,7 +902,8 @@ namespace SCLive4Emulator
                 if (Directory.Exists(p)) { folders.Add(p); continue; }
                 string ext = Path.GetExtension(p).ToLowerInvariant();
                 if (AudioExt.Contains(ext)) { music.Add(p); continue; }
-                if (ext == ".img" || ext == ".gz" || ext == ".tgz")
+                // .exe and .zip: inMusic's firmware updaters (the emulator takes the image out)
+                if (ext == ".img" || ext == ".gz" || ext == ".tgz" || ext == ".exe" || ext == ".zip")
                 {
                     string lin;
                     try { lin = Wsl.ToWslPath(p); } catch (Exception ex) { Log(ex.Message); continue; }

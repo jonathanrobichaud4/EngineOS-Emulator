@@ -32,7 +32,17 @@ VIEW_PORT=${VIEW_PORT:-8090}
 CONSOLE_PORT=${CONSOLE_PORT:-8080}
 QEMU=/usr/bin/qemu-arm-static   # replaced by find_qemu() if the distro names it differently
 # Emulated USB Ethernet: the deck lives in its own network namespace behind NAT.
+# Saved settings (emu.sh graphics ...); the environment still wins.
+if [ -f "$HERE/emu.conf" ]; then
+    _gl_env=${EMU_GL:-}
+    # shellcheck source=/dev/null
+    . "$HERE/emu.conf"
+    [ -z "$_gl_env" ] || EMU_GL=$_gl_env
+fi
 EMU_NET=${EMU_NET:-1}
+# Rendering: EMU_GL=1 real OpenGL through virgl (see gl_ready), 0 Qt's software renderer,
+# auto (default) GL when it's available for this firmware.
+EMU_GL=${EMU_GL:-auto}
 NETNS=enginex
 NET_HOST_IF=emu0
 NET_HOST_IP=10.77.0.1
@@ -94,6 +104,7 @@ deps() {
     # The software waveforms: ffmpeg decodes the tracks, numpy splits them into bands.
     python3 -c 'import numpy' 2>/dev/null || miss+=(python3-numpy)
     command -v ffmpeg >/dev/null || miss+=(ffmpeg)
+    command -v virgl_test_server >/dev/null || miss+=(virgl-server)
     if [ ${#miss[@]} -gt 0 ]; then
         say "installing ${miss[*]}"
         apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${miss[@]}"
@@ -113,6 +124,44 @@ binfmt() {
         > /proc/sys/fs/binfmt_misc/register
 }
 
+# OpenGL through virgl (the approach QEngine uses, https://github.com/Peyton-C/QEngine, here over
+# vtest instead of a VM's virtio-gpu): Engine's Mesa gets a virgl driver (files/gl, built by
+# tools/build_mesa_virgl.sh for the firmware's exact Mesa version) and sends its GL over a socket
+# to virgl_test_server, which draws it natively on the PC. Shaders work, so Engine's own
+# waveforms, coloured icons and effects draw, and the software stand-ins stand down.
+# Sets GL=1 or 0.
+gl_ready() {
+    GL=0
+    [ "$EMU_GL" = 0 ] && return 0
+    local want have=""
+    want=$(cat "$HERE/files/gl/MESA_VERSION" 2>/dev/null)
+    have=$(grep -aoE -m1 'Mesa [0-9]+\.[0-9]+(\.[0-9]+)?' "$R/usr/lib/dri/swrast_dri.so" 2>/dev/null | head -n1 | sed 's/^Mesa //')
+    if [ -z "$want" ] || [ ! -f "$HERE/files/gl/swrast_dri.so" ]; then
+        [ "$EMU_GL" = 1 ] && die "no virgl Mesa driver in files/gl (see tools/build_mesa_virgl.sh)"
+        return 0
+    fi
+    if [ "$have" != "$want" ]; then
+        [ "$EMU_GL" = 1 ] && die "this firmware has Mesa ${have:-?}; files/gl is built for $want (rebuild with tools/build_mesa_virgl.sh $have)"
+        say "note: firmware Mesa ${have:-?} doesn't match the bundled $want driver; using software rendering"
+        return 0
+    fi
+    command -v virgl_test_server >/dev/null || {
+        [ "$EMU_GL" = 1 ] && die "virgl_test_server is missing (sudo apt install virgl-server)"
+        return 0; }
+    GL=1
+}
+
+# Point inMusic's telemetry hosts at localhost so nothing the emulated deck does reaches
+# inMusic's error reporting or analytics. List from QEngine (rootfs_steps/block_telemetry.sh,
+# MIT, Copyright (c) Peyton-C); Engine handles the failed connections.
+block_telemetry() {
+    local host
+    for host in o230257.ingest.sentry.io analytics.inmusicbrands.com posthog.data.aws.inmusic.dev \
+                posthog.inmusic-cloud.prod.aws.inmusic.dev ssl.google-analytics.com; do
+        grep -qxF "127.0.0.1 $host" "$R/etc/hosts" 2>/dev/null || echo "127.0.0.1 $host" >> "$R/etc/hosts"
+    done
+}
+
 prepare_rootfs() {
     mkdir -p "$R/etc/emu" "$R/usr/bin"
     rm -rf "$R/sys" && tar -C "$R" -xzf "$HERE/files/fakesys.tar.gz"
@@ -127,6 +176,11 @@ prepare_rootfs() {
     if [ "$(head -n1 "$R/etc/emu/gl-items.txt" 2>/dev/null)" != "# $stamp" ]; then
         { echo "# $stamp"; python3 "$HERE/tools/gl_items.py" "$R/usr/Engine/Engine" "$R/lib/libQt6Quick.so.6" 2>/dev/null; } \
             > "$R/etc/emu/gl-items.txt" || :
+    fi
+    block_telemetry
+    rm -rf "$R/usr/lib/emu-dri"
+    if [ -f "$HERE/files/gl/swrast_dri.so" ]; then
+        mkdir -p "$R/usr/lib/emu-dri"; cp "$HERE/files/gl/swrast_dri.so" "$R/usr/lib/emu-dri/swrast_dri.so"
     fi
     cp "$HERE/files/systemctl" "$R/etc/emu/systemctl"; chmod 755 "$R/etc/emu/systemctl"
     [ -e "$R/etc/emu/systemctl.real" ] || cp -a "$R/usr/bin/systemctl" "$R/etc/emu/systemctl.real"
@@ -304,8 +358,22 @@ cmd_setup() {
     deps
     [ ! -e "$R/usr/Engine/Engine" ] || { cmd_stop >/dev/null 2>&1 || :; say "replacing existing rootfs"; mounts_down; rm -rf "$R"; }
     mkdir -p "$STATE"
-    say "extracting rootfs from ${fw##*/}"
-    python3 "$HERE/tools/az0x_extract.py" "$fw" "$STATE/rootfs.img" rootfs
+    # A Windows updater .exe, a Mac updater zip or a zipped image carry the same update image;
+    # QEngine's readers (tools/qengine) take it out and check the rootfs's own digest.
+    local magic; magic=$(head -c4 "$fw" | od -An -tx1 | tr -d ' \n')
+    case "$magic" in
+        504b0304|4d5a*|377abcaf)
+            say "taking the update image out of ${fw##*/}"
+            python3 "$HERE/tools/qengine/extract_updater.py" "$fw" "$STATE/update.img" >/dev/null ||
+                die "couldn't find an update image in ${fw##*/}"
+            fw="$STATE/update.img" ;;
+    esac
+    say "extracting rootfs from ${fw##*/} (checking its digest)"
+    if ! python3 "$HERE/tools/qengine/extract_az0x_rootfs.py" "$fw" "$STATE/rootfs.img" >/dev/null 2>"$STATE/extract.log"; then
+        say "note: $(tail -n1 "$STATE/extract.log"); trying the plain reader"
+        python3 "$HERE/tools/az0x_extract.py" "$fw" "$STATE/rootfs.img" rootfs
+    fi
+    rm -f "$STATE/update.img"
     say "unpacking ext4 image"
     mkdir -p "$R"
     debugfs -R "rdump / $R" "$STATE/rootfs.img" >/dev/null 2>"$STATE/debugfs.log" || die "debugfs failed, see $STATE/debugfs.log"
@@ -322,7 +390,18 @@ running() { [ -f "$STATE/emu.pid" ] && kill -0 "$(cat "$STATE/emu.pid")" 2>/dev/
 
 engine_loop() {
     # Restarts Engine when it exits, like engine.service does (also how the console's restart works).
-    local stock=$1 preload=/usr/lib/libemushim.so n=0
+    local stock=$1 gl=$2 preload=/usr/lib/libemushim.so n=0 render
+    if [ "$gl" = 1 ]; then
+        # eglfs on Mesa's surfaceless EGL; the shim turns its window into a pbuffer and reads
+        # frames back at each swap. eglfs insists on opening a framebuffer device but only
+        # needs it for the size, which is given here, so /dev/null does. 339x212 mm keeps Qt's 96 dpi, the same as software mode.
+        render="QT_QPA_PLATFORM=eglfs QT_QPA_EGLFS_INTEGRATION=none QT_QPA_EGLFS_WIDTH=1280 QT_QPA_EGLFS_HEIGHT=800
+            QT_QPA_EGLFS_PHYSICAL_WIDTH=339 QT_QPA_EGLFS_PHYSICAL_HEIGHT=212 QT_QPA_EGLFS_HIDECURSOR=1
+            QT_QPA_EGLFS_DISABLE_INPUT=1 QT_QPA_EGLFS_NO_LIBINPUT=1 QT_QPA_EGLFS_FB=/dev/null EGL_PLATFORM=surfaceless
+            LIBGL_DRIVERS_PATH=/usr/lib/emu-dri GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=/tmp/emu/virgl.sock EMU_GL=1"
+    else
+        render="QT_QPA_PLATFORM=offscreen:configfile=/etc/emu/screen.json QT_QUICK_BACKEND=software"
+    fi
     if [ "$stock" = 0 ] && [ -f "$R/data/enginex/bundle/lib/libengine-ui-hook.so" ]; then
         preload=$preload:${EMU_HOOK:-/data/enginex/bundle/lib/libengine-ui-hook.so}
     fi
@@ -331,10 +410,10 @@ engine_loop() {
         rm -f "$R/tmp/emu/engine-ctl"
         n=$((n + 1))
         echo "=== Engine start #$n $(date '+%F %T') preload=$preload" >> "$STATE/engine.log"
-        in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} LD_PRELOAD="$preload" \
-            QT_QPA_PLATFORM="offscreen:configfile=/etc/emu/screen.json" QT_QUICK_BACKEND=software \
+        # shellcheck disable=SC2086  # $render is a list of VAR=value words
+        in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} LD_PRELOAD="$preload" $render \
             MALLOC_ARENA_MAX=1 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
-            /usr/Engine/Engine -d0 -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
+            /usr/Engine/Engine -d0 -skipFirmwareUpdate -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
         echo "=== Engine exited $(date '+%F %T')" >> "$STATE/engine.log"
         sleep 2
@@ -351,7 +430,8 @@ cmd_start() {
             die "another profile is running ($(basename "$(dirname "$other")")); stop it first"
     done
     local stock=0; [ "${1:-}" = --stock ] && stock=1
-    deps; binfmt; prepare_rootfs >/dev/null; mounts_up; qml_inject
+    deps; binfmt; prepare_rootfs >/dev/null; mounts_up; gl_ready
+    [ "$GL" = 1 ] || qml_inject
     mkdir -p "$STATE"; : > "$STATE/engine.log"
     rm -rf "$R/tmp/emu/wave/req"
     [ -S "$R/run/dbus/system_bus_socket" ] || in_root /usr/bin/dbus-daemon --system --fork --nopidfile
@@ -362,7 +442,20 @@ cmd_start() {
         in_deck /data/enginex/bundle/bin/stream-sync --listen ":$CONSOLE_PORT" > "$STATE/stream-sync.log" 2>&1 &
         echo $! > "$STATE/stream-sync.pid"
     fi
-    engine_loop $stock </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
+    if [ "$GL" = 1 ]; then
+        mkdir -p "$R/tmp/emu"; rm -f "$R/tmp/emu/virgl.sock"
+        virgl_test_server --use-egl-surfaceless --socket-path "$R/tmp/emu/virgl.sock" \
+            </dev/null > "$STATE/virgl.log" 2>&1 &
+        echo $! > "$STATE/virgl.pid"
+        local w
+        for w in $(seq 1 20); do [ -S "$R/tmp/emu/virgl.sock" ] && break; sleep 0.25; done
+        if [ ! -S "$R/tmp/emu/virgl.sock" ]; then
+            say "note: the virgl server didn't start (see $STATE/virgl.log); using software rendering"
+            kill "$(cat "$STATE/virgl.pid")" 2>/dev/null || :; rm -f "$STATE/virgl.pid"
+            GL=0; qml_inject
+        fi
+    fi
+    engine_loop $stock "$GL" </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
     local fwd=""; [ "$EMU_NET" = 1 ] && fwd="--forward $CONSOLE_PORT=$NET_DECK_IP:$CONSOLE_PORT"
     python3 "$HERE/viewer.py" --rootfs "$R" --port "$VIEW_PORT" --console "http://localhost:$CONSOLE_PORT/" $fwd \
         < /dev/null > "$STATE/viewer.log" 2>&1 &
@@ -380,6 +473,8 @@ cmd_start() {
     [ "$i" -lt 30 ] || { tail -n 20 "$STATE/viewer.log" >&2; die "the deck page isn't answering on port $VIEW_PORT"; }
     say "booting${PROFILE:+ profile $PROFILE} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
+    if [ "$GL" = 1 ]; then say "graphics: OpenGL through virgl (EMU_GL=0 for software rendering)"
+    else say "graphics: software rendering"; fi
     [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
     [ "$EMU_NET" != 1 ] || say "network: USB Ethernet on eth0, deck $NET_DECK_IP via NAT (EMU_NET=0 to turn off)"
     say "logs:    sudo ./emu.sh ${PROFILE:+--profile $PROFILE }log      stop: sudo ./emu.sh ${PROFILE:+--profile $PROFILE }stop"
@@ -388,7 +483,7 @@ cmd_start() {
 cmd_stop() {
     need_root
     local f
-    for f in emu viewer stream-sync connman udhcpd edisks; do
+    for f in emu viewer stream-sync connman udhcpd edisks virgl; do
         [ -f "$STATE/$f.pid" ] && kill "$(cat "$STATE/$f.pid")" 2>/dev/null || :
         rm -f "$STATE/$f.pid"
     done
@@ -503,6 +598,8 @@ cmd_identify() {
     case "$f" in
         *.img|*.IMG)
             if [ "$(head -c4 "$f" 2>/dev/null)" = AZ0x ]; then echo firmware; else echo enginex; fi ;;
+        *.exe|*.EXE|*.zip|*.ZIP)  # inMusic's desktop updaters and zipped images (tools/qengine)
+            case "$(head -c2 "$f" 2>/dev/null)" in MZ|PK) echo firmware ;; *) echo unknown ;; esac ;;
         *.tar.gz|*.tgz|*.TAR.GZ)
             local list; list=$(tar tzf "$f" 2>/dev/null | head -n 400)
             if echo "$list" | grep -q '/mod.json$\|^mod.json$'; then echo mod
@@ -566,6 +663,16 @@ case "${1:-}" in
     info) cmd_info ;;
     profiles) cmd_profiles ;;
     identify) shift; cmd_identify "$@" ;;
+    graphics)
+        shift
+        case "${1:-}" in
+            auto) v=auto ;; gl|opengl) v=1 ;; software|sw) v=0 ;;
+            "") echo "${EMU_GL:-auto}"; exit 0 ;;
+            *) die "usage: ./emu.sh graphics [auto|gl|software]" ;;
+        esac
+        { grep -v '^EMU_GL=' "$HERE/emu.conf" 2>/dev/null || :; echo "EMU_GL=$v"; } > "$HERE/emu.conf.tmp"
+        mv "$HERE/emu.conf.tmp" "$HERE/emu.conf"
+        say "graphics: $1 (takes effect at the next start)" ;;
     mod-install) shift; cmd_mod_install "$@" ;;
     reset-data)
         need_root; running && die "stop it first"

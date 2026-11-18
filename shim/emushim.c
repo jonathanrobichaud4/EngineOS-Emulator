@@ -7,6 +7,10 @@
  *    renderer. Every QBackingStore::flush (one per rendered frame) copies the
  *    window image into a shared file the viewer reads (EMU_FB, default
  *    /tmp/emu/fb): 32-byte header then the pixels.
+ *    With EMU_GL=1 Engine instead renders with OpenGL through Qt's eglfs on Mesa's
+ *    surfaceless EGL, with virgl over vtest (a host virgl_test_server does the drawing).
+ *    Window surfaces become pbuffers and each eglSwapBuffers reads the frame back into the
+ *    same file. See "OpenGL mode" below.
  * 3. Input: a thread reads text commands from a FIFO (EMU_INPUT, default
  *    /tmp/emu/input) and hands them to Qt as mouse/wheel events:
  *      down X Y | move X Y | up X Y | wheel X Y DELTA
@@ -27,6 +31,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/* EMU_GL=1: Engine renders with real OpenGL (see "OpenGL mode" at the end). */
+static int gl_mode(void) {
+    static int m = -1;
+    if (m < 0) { const char *e = getenv("EMU_GL"); m = e && *e == '1'; }
+    return m;
+}
 
 int pthread_setaffinity_np(pthread_t t, size_t n, const cpu_set_t *s) { (void)t; (void)n; (void)s; return 0; }
 int sched_setaffinity(pid_t p, size_t n, const cpu_set_t *s) { (void)p; (void)n; (void)s; return 0; }
@@ -404,7 +415,7 @@ int _Z21qRegisterResourceDataiPKhS0_S0_(int version, const uchar *tree, const uc
     if (!real) real = dlsym(RTLD_NEXT, "_Z21qRegisterResourceDataiPKhS0_S0_");
     if (!real) return 0;
     struct stat st;
-    if (version < 1 || version > 3 || stat(OVL_ROOT, &st) || !S_ISDIR(st.st_mode)) return real(version, tree, names, data);
+    if (version < 1 || version > 3 || stat(OVL_ROOT, &st) || !S_ISDIR(st.st_mode) || gl_mode()) return real(version, tree, names, data);
     struct ovl w = {.tree = (uchar *)tree, .names = names, .data = data, .node_size = version >= 2 ? 22 : 14};
     size_t bytes = (size_t)(ovl_max(&w, 0) + 1) * w.node_size;
     uchar *copy = malloc(bytes);
@@ -520,6 +531,7 @@ static int main_base_cb(struct dl_phdr_info *info, size_t size, void *data) {
     return 1; /* first entry is the main program */
 }
 __attribute__((constructor)) static void gl_items_patch(void) {
+    if (gl_mode()) return; /* real OpenGL: the items draw themselves */
     char exe[256] = {0};
     if (readlink("/proc/self/exe", exe, sizeof exe - 1) < 0 || !strstr(exe, "/usr/Engine/Engine")) return;
     FILE *f = fopen("/etc/emu/gl-items.txt", "r");
@@ -543,4 +555,111 @@ __attribute__((constructor)) static void gl_items_patch(void) {
         fprintf(stderr, "emushim: %s drawn as empty (needs OpenGL)\n", name);
     }
     fclose(f);
+}
+
+
+/* ---- OpenGL mode (EMU_GL=1) ------------------------------------------------------------
+ * Engine runs on Qt's eglfs with EGL_PLATFORM=surfaceless and Mesa's virgl driver talking to
+ * a virgl_test_server on the host over a socket (GALLIUM_DRIVER=virpipe), so its GL, shaders
+ * and waveforms included, is drawn natively on the PC instead of rasterized under qemu.
+ * Surfaceless EGL has no windows, so the window eglfs asks for becomes a pbuffer of the screen
+ * size, and every buffer swap reads the frame back into the viewer's file. */
+typedef void *EGLDisplay, *EGLConfig, *EGLSurface;
+typedef int32_t EGLint;
+typedef unsigned EGLBoolean;
+#define EGL_SURFACE_TYPE 0x3033
+#define EGL_WINDOW_BIT 0x0004
+#define EGL_PBUFFER_BIT 0x0001
+#define EGL_WIDTH 0x3057
+#define EGL_HEIGHT 0x3056
+#define EGL_NONE 0x3038
+#define GL_RGBA 0x1908
+#define GL_BGRA_EXT 0x80E1
+#define GL_UNSIGNED_BYTE 0x1401
+#define GL_NO_ERROR 0
+static EGLSurface gl_surface;
+static int gl_w = 1280, gl_h = 800;
+
+static void gl_screen_size(void) {
+    const char *w = getenv("QT_QPA_EGLFS_WIDTH"), *h = getenv("QT_QPA_EGLFS_HEIGHT");
+    if (w && atoi(w) > 0) gl_w = atoi(w);
+    if (h && atoi(h) > 0) gl_h = atoi(h);
+}
+
+EGLBoolean eglChooseConfig(EGLDisplay dpy, const EGLint *attrs, EGLConfig *configs, EGLint size, EGLint *num) {
+    static EGLBoolean (*real)(EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *);
+    if (!real) real = dlsym(RTLD_NEXT, "eglChooseConfig");
+    if (!gl_mode() || !attrs) return real(dpy, attrs, configs, size, num);
+    EGLint copy[128];
+    int n = 0;
+    for (; attrs[n] != EGL_NONE && n < 126; n += 2) {
+        copy[n] = attrs[n];
+        copy[n + 1] = attrs[n] == EGL_SURFACE_TYPE ? ((attrs[n + 1] & ~EGL_WINDOW_BIT) | EGL_PBUFFER_BIT) : attrs[n + 1];
+    }
+    copy[n] = EGL_NONE;
+    return real(dpy, copy, configs, size, num);
+}
+
+static EGLSurface gl_pbuffer(EGLDisplay dpy, EGLConfig cfg) {
+    static EGLSurface (*pb)(EGLDisplay, EGLConfig, const EGLint *);
+    if (!pb) pb = dlsym(RTLD_NEXT, "eglCreatePbufferSurface");
+    gl_screen_size();
+    EGLint a[] = {EGL_WIDTH, gl_w, EGL_HEIGHT, gl_h, EGL_NONE};
+    gl_surface = pb(dpy, cfg, a);
+    fprintf(stderr, "emushim: OpenGL screen %dx%d through virgl (pbuffer %p)\n", gl_w, gl_h, gl_surface);
+    return gl_surface;
+}
+EGLSurface eglCreateWindowSurface(EGLDisplay dpy, EGLConfig cfg, uintptr_t win, const EGLint *attrs) {
+    static EGLSurface (*real)(EGLDisplay, EGLConfig, uintptr_t, const EGLint *);
+    if (!gl_mode()) { if (!real) real = dlsym(RTLD_NEXT, "eglCreateWindowSurface"); return real(dpy, cfg, win, attrs); }
+    return gl_pbuffer(dpy, cfg);
+}
+EGLSurface eglCreatePlatformWindowSurface(EGLDisplay dpy, EGLConfig cfg, void *win, const intptr_t *attrs) {
+    static EGLSurface (*real)(EGLDisplay, EGLConfig, void *, const intptr_t *);
+    if (!gl_mode()) { if (!real) real = dlsym(RTLD_NEXT, "eglCreatePlatformWindowSurface"); return real(dpy, cfg, win, attrs); }
+    return gl_pbuffer(dpy, cfg);
+}
+
+/* The window touches go to: eglfs has one full-screen window. */
+static void gl_find_window(void) {
+    static void *(*top_at)(const QPoint *);
+    if (main_window) return;
+    if (!top_at) top_at = dlsym(RTLD_DEFAULT, "_ZN15QGuiApplication10topLevelAtERK6QPoint");
+    QPoint p = {gl_w / 2, gl_h / 2};
+    if (top_at) main_window = top_at(&p);
+}
+
+EGLBoolean eglSwapBuffers(EGLDisplay dpy, EGLSurface surf) {
+    static EGLBoolean (*real)(EGLDisplay, EGLSurface);
+    static void (*read_px)(int, int, int, int, unsigned, unsigned, void *);
+    static unsigned (*get_err)(void);
+    static int bgra = -1;
+    static unsigned char *tmp;
+    if (!real) real = dlsym(RTLD_NEXT, "eglSwapBuffers");
+    if (!gl_mode() || surf != gl_surface) return real(dpy, surf);
+    if (!read_px) { read_px = dlsym(RTLD_DEFAULT, "glReadPixels"); get_err = dlsym(RTLD_DEFAULT, "glGetError"); }
+    resolve();
+    gl_find_window();
+    if (!fb) open_fb();
+    size_t bpl = (size_t)gl_w * 4;
+    if (read_px && fb && bpl * gl_h + FB_HEADER <= fb_size) {
+        if (!tmp) tmp = malloc(bpl * gl_h);
+        if (bgra != 0) {
+            while (get_err && get_err() != GL_NO_ERROR) {}
+            read_px(0, 0, gl_w, gl_h, GL_BGRA_EXT, GL_UNSIGNED_BYTE, tmp);
+            if (bgra < 0) bgra = !(get_err && get_err() != GL_NO_ERROR);
+        }
+        if (bgra == 0) {
+            read_px(0, 0, gl_w, gl_h, GL_RGBA, GL_UNSIGNED_BYTE, tmp);
+            for (size_t i = 0; i < bpl * gl_h; i += 4) { unsigned char t = tmp[i]; tmp[i] = tmp[i + 2]; tmp[i + 2] = t; }
+        }
+        /* GL rows run bottom-up */
+        for (int y = 0; y < gl_h; y++) memcpy(fb + FB_HEADER + (size_t)y * bpl, tmp + (size_t)(gl_h - 1 - y) * bpl, bpl);
+        uint32_t *hdr = (uint32_t *)fb;
+        screen_w = gl_w; screen_h = gl_h;
+        hdr[1] = (uint32_t)gl_w; hdr[2] = (uint32_t)gl_h; hdr[3] = (uint32_t)bpl; hdr[4] = 5; /* QImage::Format_RGB32 */
+        __atomic_store_n(&hdr[5], hdr[5] + 1, __ATOMIC_RELEASE);
+        memcpy(fb, "EMUF", 4);
+    }
+    return real(dpy, surf);
 }

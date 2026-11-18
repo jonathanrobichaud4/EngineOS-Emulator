@@ -13,11 +13,10 @@ Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with E
 | USB drives and SD card | Any folder on your PC. Engine sees it plugged in, mounts it, writes its Engine Library to it and plays from it. |
 | Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, so streaming logins, update checks and online features should work. |
 | Reboot | The **Reboot** button restarts the whole emulated deck. |
-| Waveforms | Main waveforms and overviews, drawn by the emulator (see below). |
+| Graphics | Engine renders with real OpenGL, sent through virgl to your PC, so its own waveforms, beat grids, coloured icons and effects all draw. See "Graphics" below. |
 
 Not emulated yet:
 
-- **Engine's own waveform drawing.** Engine draws waveforms with OpenGL and the emulator renders without a GPU, so the emulator draws its own instead: it decodes the track (ffmpeg), splits it into low, mid and high bands, and scrolls that picture with the play position. The shape and timing are right but the look isn't Engine's exactly, and cue, loop and beat-grid markers on the waveform aren't drawn yet. Streaming tracks don't get a waveform yet, only files on drives.
 - Mic and aux inputs (silent), the USB audio gadget, Bluetooth, Wi-Fi, and the jog wheel displays.
 - Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
@@ -35,7 +34,7 @@ Windows may warn the first time ("Windows protected your PC") because the progra
 ## What you need
 
 - Windows 10/11 with WSL2 and Ubuntu (22.04 or 24.04). If you don't have it, open PowerShell as admin and run `wsl --install -d Ubuntu`, then reboot.
-- The stock SC LIVE 4 firmware `.img` (the Engine OS 5.3.0 update file from Denon DJ).
+- The stock SC LIVE 4 firmware: the Engine OS 5.3.0 `.img` update file from Denon DJ, or the Windows updater `.exe` or Mac updater `.zip`, which carry the same image.
 - An EngineX data bundle `.tar.gz` (for example `SCLIVE4-5.3.0.4-EngineX-OS-Data-Bundle.tar.gz`). Optional; you can run stock Engine without it.
 
 ## Setup (once)
@@ -52,6 +51,12 @@ sudo ./emu.sh setup /mnt/c/Users/<you>/Downloads/<firmware>.img \
 Keep the folder in your Linux home, not under `/mnt/c`. Setup installs what it needs from Ubuntu's packages, pulls the root file system out of the firmware and installs EngineX into it. It takes about a minute and uses about 1.2 GB.
 
 Updating: `sudo ./emu.sh stop`, then `git pull`, then `sudo ./emu.sh start`. Your rootfs, settings and drives are kept, since git ignores them.
+
+## Graphics
+
+Engine draws its UI with OpenGL ES. The emulator gives it a Mesa virgl driver (`files/gl/`, built for the firmware's Mesa 24.0.7), so Engine's GL calls go over a socket to `virgl_test_server` on your PC, which draws them natively with Mesa (on the CPU with llvmpipe, or your GPU where WSL exposes one). The idea comes from [QEngine](https://github.com/Peyton-C/QEngine), which does the same through a QEMU VM's virtual GPU; here it runs over virgl's vtest socket, so the deck keeps running under qemu-user with its audio and controls.
+
+If the screen looks wrong on your PC, switch to software rendering: tick "Software rendering" in the Windows app's More... menu, or run `./emu.sh graphics software` (`auto` to go back), then restart the deck. Software rendering draws everything except shader effects; the emulator then draws its own waveforms from the audio (no beat grid or markers) and plain versions of a few faded and coloured elements.
 
 ## Running it
 
@@ -120,15 +125,14 @@ To test a different stock firmware, run `setup` again with the other `.img`. It 
 
 ## How it works
 
-- `tools/az0x_extract.py` reads the AZ0x firmware container and decompresses the `rootfs` partition; `debugfs` copies the ext4 image out to `rootfs/`.
+- Firmware: QEngine's readers in `tools/qengine/` take the update image out of an updater `.exe` or `.zip` and extract the rootfs, checking its digest (`tools/az0x_extract.py` is the fallback); `debugfs` copies the ext4 image out to `rootfs/`. Telemetry hosts from QEngine's list are pointed at localhost, and Engine starts with `-skipFirmwareUpdate` so it doesn't try to flash the virtual controller.
 - qemu-user runs the ARM binaries through binfmt_misc inside a chroot of that root file system.
 - `files/fakesys.tar.gz` is a fake `/sys` made from the SC LIVE 4 device tree (product code JP21, CPU info, a non-blank eFuse). Without it Engine decides it's on a factory board and drops into test mode. All identifiers in it are placeholders.
 - `shim/libemushim.so` is preloaded into Engine (source in `shim/`):
-  - `emushim.c` copies every frame into `/tmp/emu/fb`, turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `files/qml/`, and reports crashes with the library and offset.
+  - `emushim.c` copies every frame into `/tmp/emu/fb` (in OpenGL mode it turns eglfs's window into a pbuffer on Mesa's surfaceless EGL and reads each frame back at the buffer swap), turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `files/qml/`, and reports crashes with the library and offset.
   - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
-- `files/qml/` replaces built-in QML that needs a GPU. Right now that's `UIKit/Icons/ColoredImage.qml`, which every icon goes through.
-- Waveforms: `viewer.py` (class `Waves`) renders each loaded track to PNGs. The QML that shows them is in `files/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
-- `tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
+- Software rendering only: `files/qml/` replaces built-in QML that needs shaders (`ColoredImage`, which every icon goes through, and the faded scrolling text), and the waveforms come from `viewer.py` (class `Waves`) renders each loaded track to PNGs. The QML that shows them is in `files/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
+- Software rendering only: `tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
 - `edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
 - `viewer.py` serves the page (`files/panel.html`, drawn from `files/panel.json`), turns panel actions into the JP21 MIDI messages (`tools/make_panel.py` holds the map, taken from Engine's own JP21 assignment file), answers Engine's "report all controls" query like the hardware does, and streams the audio.
 - Networking: the deck runs in its own network namespace with an `eth0`, gets an address from the firmware's own `udhcpd` on the PC side, and runs its own `connmand` (set to leave your PC's clock alone). `/proc/interrupts` and `/proc/irq` are faked inside so Engine finds its control-surface serial port.
@@ -145,6 +149,10 @@ make -C shim
 
 The panel layout and MIDI map live in `tools/make_panel.py`; run it to regenerate `files/panel.json`.
 
+`files/gl/swrast_dri.so` is prebuilt too (Mesa, MIT licensed). `sudo tools/build_mesa_virgl.sh [VERSION]` rebuilds it on Ubuntu 24.04, for another firmware's Mesa version if needed.
+
 ## Notes
+
+Thanks to [QEngine](https://github.com/Peyton-C/QEngine) (MIT) for the virgl approach, the firmware readers in `tools/qengine/` and the telemetry list.
 
 No Denon firmware, Engine code or anything from a real deck is in this repository: you supply the firmware, and the identifiers the emulator presents (serial numbers, volume IDs) are placeholders. Mods for EngineX are in [enginex-mods](https://github.com/jonathanrobichaud4/enginex-mods).

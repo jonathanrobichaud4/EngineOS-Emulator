@@ -6,3 +6,4 @@ drives.txt
 *.img
 __pycache__/
 *.pyc
+emu.conf
