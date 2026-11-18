@@ -1,0 +1,46 @@
+# A numbered release with both apps: push a tag like v1.0.0 and this builds the Mac and Windows
+# apps from that commit and publishes them as the release for that tag. (The rolling mac-app and
+# windows-app releases, which the apps update themselves from, are built by their own workflows.)
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build"
+      - run: ditto -c -k --keepParent "build/SC LIVE 4 Emulator.app" SCLive4Emulator-mac.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: mac, path: SCLive4Emulator-mac.zip }
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel >/dev/null
+      - run: BUILD_COMMIT=${{ github.sha }} windows/build.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: windows/SCLive4Emulator.exe }
+  publish:
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<NOTES
+          SC LIVE 4 Emulator apps, built from ${GITHUB_SHA::7}.
+
+          - **Mac** (macOS 13 or later, Apple Silicon and Intel): SCLive4Emulator-mac.zip. Unzip, move the app to Applications, and the first time right-click it and choose Open (it isn't notarized). It runs the emulator in a Lima Linux VM; click Install in the app.
+          - **Windows** (10 and 11): SCLive4Emulator.exe. It runs the emulator in WSL. Windows may warn the first time because it isn't signed: More info, then Run anyway.
+
+          Both apps update themselves from the rolling mac-app and windows-app releases (an option in their settings), and update the emulator itself from the repository.
+          NOTES
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "SC LIVE 4 Emulator $TAG" --notes-file notes.md \
+            mac/SCLive4Emulator-mac.zip windows/SCLive4Emulator.exe
