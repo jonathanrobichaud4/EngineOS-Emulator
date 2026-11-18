@@ -121,7 +121,7 @@ function send(line){q.push(line);if(!busy)flush()}
 async function flush(){busy=true;while(q.length){const b=q.splice(0).join("\n");await post("/control",b)}busy=false}
 
 // ---------------------------------------------------------------- layout scaling
-function fit(){const s=$("#stage"),k=Math.min(s.clientWidth/P.w,s.clientHeight/P.h)*0.985;
+function fit(){panel.style.width=P.w+"px";panel.style.height=P.h+"px";const s=$("#stage"),k=Math.min(s.clientWidth/P.w,s.clientHeight/P.h)*0.985;
   panel.style.transform=`scale(${k})`;panel.style.position="absolute";
   panel.style.left=((s.clientWidth-P.w*k)/2)+"px";panel.style.top=((s.clientHeight-P.h*k)/2)+"px";panel._k=k}
 addEventListener("resize",()=>P&&fit());

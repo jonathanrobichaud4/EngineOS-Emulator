@@ -3,8 +3,11 @@
 
 Every MIDI number here comes from Engine's own JP21 assignment file
 (/usr/Engine/AssignmentFiles/PresetAssignmentFiles/JP21/JP21_Controller_Assignments.qml) and
-the ControlSurfaceModules it uses. Positions follow the SC LIVE 4 top panel (with the screen
-drawn larger than life so it stays usable on a monitor). Coordinates are in a 1900 x 1080 space.
+the ControlSurfaceModules it uses. Positions follow the top panel drawing in Denon's SC LIVE 4
+user guide: each control is placed at its spot in that drawing (D() below takes drawing
+coordinates, a 1475 x 844 image) scaled up 1.36x. The one exception is the touchscreen, drawn
+larger than life (it grows into the empty space above the decks) so it stays usable on a monitor;
+the buttons beside it move out with it. Coordinates are in a 1900 x 1120 space.
 
 Control types:
   btn    momentary button: note on 127 / note off. LED = same channel+note.
@@ -31,112 +34,137 @@ def add(**k):
     C.append(k)
 
 
+S = 1.36                 # drawing -> panel scale
+BX, BY = 52, 395         # where drawing point (75, 265) lands: the body's left edge, the mixer's top
+
+
+def X(x): return round(BX + (x - 75) * S)
+def Y(y): return round(BY + (y - 265) * S)
+def L(v): return round(v * S)  # a length
+
+
+def put(t, cx, cy, w, h, **k):
+    """Adds a control centred on drawing point (cx, cy), w x h in drawing units (min sizes keep it usable)."""
+    pw, ph = max(L(w), k.pop("minw", 0)), max(L(h), k.pop("minh", 0))
+    add(t=t, x=X(cx) - pw // 2, y=Y(cy) - ph // 2, w=pw, h=ph, **k)
+
+
+def lab(text, cx, cy, w=60, big=0):
+    add(t="label", lab=text, x=X(cx) - L(w) // 2, y=Y(cy) - 7, w=L(w), h=14, **({"big": 1} if big else {}))
+
+
 # ---------------------------------------------------------------- screen module, browse
-SX, SY, SW = 600, 22, 700            # screen 700 x 437.5
-add(t="screen", x=SX, y=SY, w=SW, h=SW / 1.6)
-add(t="btn", id="lighting", lab="LIGHTING", x=548, y=40, w=40, h=40, ch=G, n=39, round=1)
-add(t="btn", id="view", lab="VIEW", x=546, y=110, w=46, h=28, ch=G, n=14)
-add(t="btn", id="menu", lab="MENU", x=546, y=160, w=46, h=28, ch=G, n=13)
-add(t="btn", id="back", lab="BACK", x=1308, y=60, w=46, h=28, ch=G, n=3)
-add(t="enc", id="browse", lab="BROWSE", x=1306, y=150, w=50, h=50, ch=G, cc=5, push=6)
-add(t="btn", id="forward", lab="FWD", x=1308, y=262, w=46, h=28, ch=G, n=4)
-add(t="btn", id="load_l", lab="LOAD 1", x=546, y=330, w=46, h=28, ch=G, n=1)
-add(t="btn", id="load_r", lab="LOAD 2", x=1308, y=330, w=46, h=28, ch=G, n=2)
+# Screen centre is drawing x 742; it spans the space above the mixer and decks.
+SW, SH = 600, 375
+SCX = X(742)
+add(t="screen", x=SCX - SW // 2, y=12, w=SW, h=SH)
+def sy(y): return round(12 + (y - 60) / 190 * SH)   # drawing y beside the screen (60..250) -> panel y
+LX, RX = SCX - SW // 2 - 40, SCX + SW // 2 + 40      # columns left and right of the screen
+add(t="btn", id="view", lab="VIEW", x=LX - 22, y=sy(110) - 22, w=44, h=44, ch=G, n=14, round=1)
+add(t="btn", id="menu", lab="MENU", x=LX - 27, y=sy(155) - 15, w=54, h=30, ch=G, n=13)
+add(t="btn", id="lighting", lab="LIGHTING", x=LX - 30, y=sy(203) - 15, w=60, h=30, ch=G, n=39, small=1)
+add(t="btn", id="back", lab="BACK", x=RX - 47, y=sy(88) - 17, w=44, h=34, ch=G, n=3)
+add(t="btn", id="forward", lab="FWD", x=RX + 3, y=sy(88) - 17, w=44, h=34, ch=G, n=4)
+add(t="enc", id="browse", lab="BROWSE", x=RX - 30, y=sy(150) - 30, w=60, h=60, ch=G, cc=5, push=6)
+add(t="btn", id="load_l", lab="◀ LOAD", x=RX - 47, y=sy(205) - 17, w=44, h=34, ch=G, n=1, small=1)
+add(t="btn", id="load_r", lab="LOAD ▶", x=RX + 3, y=sy(205) - 17, w=44, h=34, ch=G, n=2, small=1)
 
 
 # ---------------------------------------------------------------- decks
-def deck(side, ox, ch):
+# Both decks have the same layout; the right one sits 866 drawing units further right.
+def deck(side, dx, ch):
     p = f"d{side}_"
-    # left column
-    add(t="enc", id=p + "autoloop", lab="AUTO LOOP", x=ox + 18, y=40, w=60, h=60, ch=ch, cc=32, push=39)
-    add(t="btn", id=p + "loopin", lab="IN", x=ox + 14, y=130, w=34, h=26, ch=ch, n=37)
-    add(t="btn", id=p + "loopout", lab="OUT", x=ox + 52, y=130, w=34, h=26, ch=ch, n=38)
-    add(t="btn", id=p + "censor", lab="CENSOR", x=ox + 14, y=182, w=72, h=28, ch=ch, n=1)
-    add(t="btn", id=p + "deck", lab="DECK", x=ox + 28, y=236, w=44, h=44, ch=ch, n=31, round=1)
-    add(t="label", lab="TRACK SKIP", x=ox + 10, y=300, w=80, h=14)
-    add(t="btn", id=p + "prev", lab="⏮", x=ox + 14, y=316, w=34, h=26, ch=ch, n=4)
-    add(t="btn", id=p + "next", lab="⏭", x=ox + 52, y=316, w=34, h=26, ch=ch, n=5)
-    add(t="label", lab="BEAT JUMP", x=ox + 10, y=360, w=80, h=14)
-    add(t="btn", id=p + "bjprev", lab="◀", x=ox + 14, y=376, w=34, h=26, ch=ch, n=6)
-    add(t="btn", id=p + "bjnext", lab="▶", x=ox + 52, y=376, w=34, h=26, ch=ch, n=7)
-    add(t="btn", id=p + "cue", lab="CUE", x=ox + 12, y=640, w=78, h=78, ch=ch, n=9, big=1)
-    add(t="btn", id=p + "play", lab="▶❙❙", x=ox + 12, y=740, w=78, h=78, ch=ch, n=10, big=1, col="#2bd46a")
+    def d(x): return x + dx
+    put("enc", d(119), 304, 42, 42, id=p + "autoloop", lab="AUTO LOOP", ch=ch, cc=32, push=39)
+    put("btn", d(103), 364, 26, 16, id=p + "loopin", lab="IN", ch=ch, n=37)
+    put("btn", d(136), 364, 26, 16, id=p + "loopout", lab="OUT", ch=ch, n=38)
+    put("btn", d(119), 409, 40, 17, id=p + "censor", lab="CENSOR", ch=ch, n=1)
+    lab(str(side), d(119), 459, 20, big=1)
+    put("btn", d(119), 484, 28, 28, id=p + "deck", lab="DECK", ch=ch, n=31, round=1)
+    lab(str(side + 2), d(119), 511, 20, big=1)
+    lab("TRACK SKIP", d(119), 537, 70)
+    put("btn", d(102), 553, 24, 22, id=p + "prev", lab="⏮", ch=ch, n=4, round=1)
+    put("btn", d(137), 553, 24, 22, id=p + "next", lab="⏭", ch=ch, n=5, round=1)
+    lab("BEAT JUMP", d(119), 583, 70)
+    put("btn", d(102), 600, 24, 22, id=p + "bjprev", lab="◀", ch=ch, n=6, round=1)
+    put("btn", d(137), 600, 24, 22, id=p + "bjnext", lab="▶", ch=ch, n=7, round=1)
+    put("btn", d(120), 665, 52, 48, id=p + "cue", lab="CUE", ch=ch, n=9, big=1)
+    put("btn", d(120), 733, 52, 42, id=p + "play", lab="▶❙❙", ch=ch, n=10, big=1, col="#2bd46a")
     # jog wheel
-    add(t="jog", id=p + "jog", lab=f"DECK {side}", x=ox + 112, y=150, w=350, h=350, ch=ch, cc=0x11, cc2=0x31, touch=33)
+    put("jog", d(307), 475, 300, 300, id=p + "jog", lab=f"DECK {side}", ch=ch, cc=0x11, cc2=0x31, touch=33)
     # right of the jog
-    add(t="btn", id=p + "sync", lab="SYNC", x=ox + 440, y=40, w=66, h=30, ch=ch, n=8, col="#3aa0ff")
-    add(t="btn", id=p + "vinyl", lab="VINYL", x=ox + 420, y=90, w=48, h=26, ch=ch, n=35)
-    add(t="btn", id=p + "slip", lab="SLIP", x=ox + 472, y=90, w=48, h=26, ch=ch, n=36, col="#3aa0ff")
-    add(t="pitch", id=p + "pitch", lab="TEMPO", x=ox + 478, y=200, w=40, h=360, ch=ch, cc=0x1F, cc2=0x4B, led=42)
-    add(t="btn", id=p + "keylock", lab="KEY", x=ox + 428, y=470, w=38, h=24, ch=ch, n=34)
-    add(t="btn", id=p + "bendm", lab="−", x=ox + 458, y=580, w=30, h=26, ch=ch, n=29)
-    add(t="btn", id=p + "bendp", lab="+", x=ox + 492, y=580, w=30, h=26, ch=ch, n=30)
-    add(t="label", lab="PITCH BEND", x=ox + 450, y=608, w=80, h=14)
+    put("btn", d(495), 330, 34, 19, id=p + "vinyl", lab="VINYL", ch=ch, n=35)
+    put("btn", d(480), 391, 28, 17, id=p + "sync", lab="SYNC", ch=ch, n=8, col="#3aa0ff")
+    put("btn", d(512), 391, 28, 17, id=p + "keylock", lab="♪", ch=ch, n=34)
+    put("pitch", d(496), 563, 22, 226, id=p + "pitch", lab="TEMPO", ch=ch, cc=0x1F, cc2=0x4B, led=42)
+    put("btn", d(437), 607, 23, 23, id=p + "slip", lab="SLIP", ch=ch, n=36, round=1, col="#3aa0ff", small=1)
+    lab("PITCH BEND", d(496), 716, 60)
+    put("btn", d(481), 732, 24, 15, id=p + "bendm", lab="−", ch=ch, n=29)
+    put("btn", d(511), 732, 24, 15, id=p + "bendp", lab="+", ch=ch, n=30)
     # pad section
-    add(t="btn", id=p + "shift", lab="SHIFT", x=ox + 112, y=640, w=46, h=24, ch=ch, n=28)
-    for i, lab in enumerate(["HOT CUE", "LOOP", "ROLL", "SLICER"]):
-        add(t="btn", id=f"{p}mode{i + 1}", lab=lab, x=ox + 166 + i * 62, y=640, w=56, h=24, ch=ch, n=11 + i, small=1)
-    add(t="btn", id=p + "parml", lab="◀", x=ox + 418, y=640, w=34, h=24, ch=ch, n=23)
-    add(t="btn", id=p + "parmr", lab="▶", x=ox + 456, y=640, w=34, h=24, ch=ch, n=24)
-    for r in range(2):
-        for c in range(4):
+    put("btn", d(215), 646, 24, 14, id=p + "shift", lab="SHIFT", ch=ch, n=28, small=1)
+    for i, (lb, x) in enumerate(zip(["CUE", "LOOP", "ROLL", "SLICER"], [245, 276, 307, 338])):
+        put("btn", d(x), 646, 26, 14, id=f"{p}mode{i + 1}", lab=lb, ch=ch, n=11 + i, small=1)
+    put("btn", d(370), 646, 24, 14, id=p + "parml", lab="◀", ch=ch, n=23)
+    put("btn", d(401), 646, 24, 14, id=p + "parmr", lab="▶", ch=ch, n=24)
+    for r, y in enumerate([687, 735]):
+        for c, x in enumerate([225, 280, 335, 390]):
             i = r * 4 + c
-            add(t="pad", id=f"{p}pad{i + 1}", lab=str(i + 1), x=ox + 112 + c * 96, y=678 + r * 92, w=88, h=84, ch=ch, n=15 + i)
+            put("pad", d(x), y, 46, 38, id=f"{p}pad{i + 1}", lab=str(i + 1), ch=ch, n=15 + i)
 
 
-deck(1, 10, 4)
-deck(2, 1360, 5)
+deck(1, 0, 4)
+deck(2, 866, 5)
 
 # ---------------------------------------------------------------- mixer
-MY = 482
-add(t="panel", x=538, y=MY, w=824, h=590)
-# left aux section
-add(t="label", lab="SPEAKER/BOOTH", x=548, y=MY + 10, w=130, h=14)
-add(t="knob", id="booth", lab="LEVEL", x=558, y=MY + 30, w=40, h=40, ch=G, cc=15, d=0)
-add(t="sw", id="speaker", lab="ON", x=616, y=MY + 32, w=46, h=36, ch=G, n=41, vals=[0, 127], d=0, labs=["OFF", "ON"])
-add(t="knob", id="mic1", lab="MIC 1", x=558, y=MY + 94, w=40, h=40, ch=G, cc=16, d=0)
-add(t="btn", id="mic1on", lab="MIC 1", x=612, y=MY + 100, w=54, h=26, ch=G, n=36)
-add(t="knob", id="mic2", lab="MIC 2/AUX", x=558, y=MY + 162, w=40, h=40, ch=G, cc=17, d=0)
-add(t="btn", id="mic2on", lab="MIC 2", x=612, y=MY + 168, w=54, h=26, ch=G, n=37)
-add(t="sw", id="micaux", lab="MIC/AUX", x=612, y=MY + 202, w=54, h=22, ch=G, n=42, vals=[0, 127], d=0, labs=["MIC", "AUX"])
-add(t="label", lab="SWEEP FX", x=548, y=MY + 238, w=130, h=14)
-for i, lab in enumerate(["FILTER", "DUB ECHO", "NOISE", "WASH"]):
-    add(t="btn", id=f"sweep{i + 1}", lab=lab, x=556 + (i % 2) * 60, y=MY + 256 + (i // 2) * 40, w=54, h=32, ch=G, n=21 + i, small=1)
-add(t="label", lab="PHONES", x=548, y=MY + 350, w=130, h=14)
-add(t="knob", id="cuemix", lab="CUE MIX", x=580, y=MY + 368, w=44, h=44, ch=G, cc=18, d=64)
-add(t="knob", id="cuegain", lab="LEVEL", x=580, y=MY + 436, w=44, h=44, ch=G, cc=19, d=64)
-add(t="sw", id="splitcue", lab="SPLIT CUE", x=572, y=MY + 506, w=60, h=22, ch=G, n=11, vals=[0, 127], d=0, labs=["OFF", "ON"])
+add(t="panel", x=X(540), y=Y(268), w=L(400), h=L(510))
+# aux column
+lab("SPEAKER/BOOTH", 572, 276, 70)
+put("knob", 557, 300, 26, 26, id="booth", lab="LEVEL", ch=G, cc=15, d=0)
+put("sw", 600, 304, 34, 14, id="speaker", lab="SPEAKER", ch=G, n=41, vals=[0, 127], d=0, labs=["OFF", "ON"])
+put("knob", 557, 367, 26, 26, id="mic1", lab="MIC 1", ch=G, cc=16, d=0)
+put("btn", 597, 367, 22, 22, id="mic1on", lab="ON", ch=G, n=36, round=1)
+put("knob", 557, 422, 26, 26, id="mic2", lab="AUX/MIC 2", ch=G, cc=17, d=0)
+put("btn", 597, 422, 22, 22, id="mic2on", lab="ON", ch=G, n=37, round=1)
+put("sw", 600, 446, 32, 12, id="micaux", lab="MIC/AUX", ch=G, n=42, vals=[0, 127], d=0, labs=["MIC", "AUX"])
+lab("SWEEP FX", 577, 498, 50)
+for i, (lb, x, y) in enumerate([("FILTER", 559, 479), ("ECHO", 559, 518), ("NOISE", 595, 479), ("WASH", 595, 518)]):
+    put("btn", x, y, 22, 22, id=f"sweep{i + 1}", lab=lb, ch=G, n=21 + i, round=1, small=1)
+put("knob", 577, 567, 26, 26, id="cuemix", lab="CUE MIX", ch=G, cc=18, d=64)
+put("knob", 577, 616, 26, 26, id="cuegain", lab="LEVEL", ch=G, cc=19, d=64)
+put("sw", 577, 659, 34, 16, id="splitcue", lab="SPLIT CUE", ch=G, n=11, vals=[0, 127], d=0, labs=["OFF", "ON"])
+lab("HEADPHONES", 577, 690, 70)
 
 # channel strips, in panel order 3 1 2 4
-for col, (name, mch) in enumerate([("3", 2), ("1", 0), ("2", 1), ("4", 3)]):
-    x = 690 + col * 122
+for (name, mch), x in zip([("3", 2), ("1", 0), ("2", 1), ("4", 3)], [647, 709, 772, 835]):
     p = f"ch{name}_"
-    add(t="knob", id=p + "trim", lab="LEVEL", x=x + 43, y=MY + 10, w=36, h=36, ch=mch, cc=3, d=64)
-    add(t="vu", id=p + "vu", x=x + 12, y=MY + 70, w=12, h=150, ch=mch, cc=10)
-    add(t="knob", id=p + "hi", lab="HIGH", x=x + 43, y=MY + 72, w=36, h=36, ch=mch, cc=4, d=64)
-    add(t="knob", id=p + "mid", lab="MID", x=x + 43, y=MY + 132, w=36, h=36, ch=mch, cc=6, d=64)
-    add(t="knob", id=p + "lo", lab="LOW", x=x + 43, y=MY + 192, w=36, h=36, ch=mch, cc=8, d=64)
-    add(t="knob", id=p + "sweep", lab="SWEEP FX", x=x + 38, y=MY + 252, w=46, h=46, ch=mch, cc=11, d=64, ring=1)
-    add(t="btn", id=p + "cue", lab="CUE", x=x + 30, y=MY + 318, w=62, h=26, ch=mch, n=13)
-    add(t="label", lab=name, x=x + 30, y=MY + 350, w=62, h=18, big=1)
-    add(t="fader", id=p + "fader", lab="", x=x + 46, y=MY + 372, w=30, h=120, ch=mch, cc=14, d=0)
-    add(t="sw", id=p + "thru", lab="THRU", x=x + 31, y=MY + 506, w=60, h=22, ch=mch, n=15, vals=[0, 1, 2], d=1, labs=["A", "THRU", "B"])
-
-# master / FX section
-add(t="knob", id="master", lab="MASTER", x=1188 + 52, y=MY + 12, w=46, h=46, ch=G, cc=20, d=90)
-add(t="vu", id="vuL", x=1198, y=MY + 70, w=10, h=150, ch=G, cc=32)
-add(t="vu", id="vuR", x=1212, y=MY + 70, w=10, h=150, ch=G, cc=33)
-add(t="enc", id="fxselect", lab="FX SELECT", x=1250, y=MY + 76, w=48, h=48, ch=G, cc=35, push=30)
-# Engine reads the FX channel switch as note 40 with the position in the velocity (DJFxAssignSwitch).
-add(t="sel", id="fxassign", lab="FX CHANNEL", x=1246, y=MY + 160, w=56, h=56, ch=G, n=40, vals=[0, 1, 2, 3, 127], labs=["3", "1", "2", "4", "M"], d=1)
-add(t="enc", id="fxtime", lab="FX PARAM/TIME", x=1250, y=MY + 250, w=48, h=48, ch=G, cc=36, push=25)
-add(t="knob", id="fxamount", lab="FX AMOUNT", x=1250, y=MY + 330, w=48, h=48, ch=G, cc=4, d=0)
-add(t="btn", id="fxon", lab="FX ON", x=1240, y=MY + 410, w=68, h=68, ch=G, n=26, round=1, col="#2a8cff", big=1)
+    put("knob", x, 292, 26, 26, id=p + "trim", lab="LEVEL", ch=mch, cc=3, d=64)
+    put("vu", x - 25, 368, 7, 74, id=p + "vu", ch=mch, cc=10)
+    put("knob", x, 342, 26, 26, id=p + "hi", lab="HIGH", ch=mch, cc=4, d=64)
+    put("knob", x, 392, 26, 26, id=p + "mid", lab="MID", ch=mch, cc=6, d=64)
+    put("knob", x, 443, 26, 26, id=p + "lo", lab="LOW", ch=mch, cc=8, d=64)
+    put("knob", x, 492, 32, 32, id=p + "sweep", lab="SWEEP FX", ch=mch, cc=11, d=64, ring=1)
+    put("btn", x, 537, 32, 14, id=p + "cue", lab="CUE", ch=mch, n=13)
+    lab(name, x, 559, 20, big=1)
+    put("fader", x, 620, 20, 92, id=p + "fader", lab="", ch=mch, cc=14, d=0)
+    put("sw", x, 703, 34, 14, id=p + "thru", lab="THRU", ch=mch, n=15, vals=[0, 1, 2], d=1, labs=["A", "THRU", "B"])
 
 # crossfader
-add(t="xfader", id="xfader", lab="", x=780, y=MY + 540, w=280, h=34, ch=G, cc=14, d=64)
+put("xfader", 742, 740, 104, 22, id="xfader", lab="", ch=G, cc=14, d=64)
 
-out = {"w": 1900, "h": 1080, "controls": C}
+# master / BPM FX column
+put("knob", 905, 292, 28, 28, id="master", lab="MAIN VOL", ch=G, cc=20, d=90)
+put("vu", 896, 372, 6, 76, id="vuL", ch=G, cc=32)
+put("vu", 914, 372, 6, 76, id="vuR", ch=G, cc=33)
+lab("BPM FX", 905, 427, 50)
+put("enc", 905, 453, 28, 28, id="fxselect", lab="SELECT", ch=G, cc=35, push=30)
+# Engine reads the FX channel switch as note 40 with the position in the velocity (DJFxAssignSwitch).
+put("sel", 905, 508, 30, 30, id="fxassign", lab="CHANNEL ASSIGN", ch=G, n=40, vals=[0, 1, 2, 3, 127], labs=["3", "1", "2", "4", "M"], d=1)
+put("enc", 905, 563, 28, 28, id="fxtime", lab="TIME/PARAMETER", ch=G, cc=36, push=25)
+put("knob", 905, 617, 26, 26, id="fxamount", lab="AMOUNT", ch=G, cc=4, d=0)
+put("btn", 905, 680, 44, 44, id="fxon", lab="FX ON/OFF", ch=G, n=26, round=1, col="#2a8cff", small=1)
+
+out = {"w": 1900, "h": 1120, "controls": C}
 path = os.path.join(os.path.dirname(__file__), "..", "files", "panel.json")
 with open(path, "w") as f:
     json.dump(out, f, indent=0)
