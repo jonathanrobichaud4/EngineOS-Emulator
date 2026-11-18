@@ -97,16 +97,27 @@ migrate_opt() {
         mv "$o" "$d" && ln -s "$d" "$o" && echo "engineos-emu: moved /opt/sclive4-emulator to /opt/engineos-emulator in the VM"' || :
 }
 
+start_vm() {
+    migrate_share; migrate_vm_config; mkdir -p "$SHARE"
+    say "starting the VM"
+    # Lima's progress lines (and its warning that ~/EngineOSEmulator sits inside the read-only
+    # home mount, which works fine) only matter if starting fails.
+    local out; out=$(limactl start "$VM" 2>&1) || { printf '%s\n' "$out" >&2; die "the VM didn't start (limactl start $VM)"; }
+}
+
 need_vm() {
     need_lima
     mkdir -p "$SHARE"
     case "$(vm_status)" in
-        Running) ;;
-        Stopped) migrate_share; migrate_vm_config; mkdir -p "$SHARE"
-                 say "starting the VM"
-                 # Lima's progress lines (and its warning that ~/EngineOSEmulator sits inside the
-                 # read-only home mount, which works fine) only matter if starting fails.
-                 local out; out=$(limactl start "$VM" 2>&1) || { printf '%s\n' "$out" >&2; die "the VM didn't start (limactl start $VM)"; } ;;
+        Running)
+            # Lima can say Running for a VM that's gone (a stop that was cut short, the Mac
+            # sleeping at the wrong moment). If it doesn't answer, stop it for good and start again.
+            if ! vm true >/dev/null 2>&1; then
+                say "the VM isn't answering; restarting it"
+                limactl stop -f "$VM" >/dev/null 2>&1 || :
+                start_vm
+            fi ;;
+        Stopped) start_vm ;;
         "")
             say "creating the VM (downloads Ubuntu 24.04, a few minutes the first time)"
             limactl create --name="$VM" --tty=false "$YAML" || die "couldn't create the VM"
@@ -203,7 +214,10 @@ update)
     ;;
 vm-stop)
     need_lima
-    if [ "$(vm_status)" = Running ]; then emu stop >/dev/null 2>&1; limactl stop "$VM"; else say "the VM isn't running"; fi
+    if [ "$(vm_status)" = Running ]; then
+        emu stop >/dev/null 2>&1
+        limactl stop "$VM" 2>/dev/null || limactl stop -f "$VM"
+    else say "the VM isn't running"; fi
     ;;
 uninstall)
     need_lima

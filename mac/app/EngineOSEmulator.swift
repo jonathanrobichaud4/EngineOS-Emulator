@@ -900,7 +900,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) { model?.quit() }
 
     /// Quitting stops the deck and the VM (unless that's turned off in Settings), so nothing keeps
-    /// running in the background. The app waits for it, up to a minute.
+    /// running in the background. The app waits for it up to three minutes; if it takes longer the
+    /// app quits anyway and leaves the stop running on its own (never cut short, which would leave
+    /// Lima thinking a dead VM is running).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let m = model, m.stopOnQuit, !m.updating, m.vm == "Running", !m.script.isEmpty else { return .terminateNow }
         m.append("\n> Stopping the deck and the VM before quitting\n")
@@ -912,7 +914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let finish = { DispatchQueue.main.async { if !done { done = true; sender.reply(toApplicationShouldTerminate: true) } } }
         p.terminationHandler = { _ in finish() }
         do { try p.run() } catch { return .terminateNow }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { p.terminate(); finish() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { finish() }
         return .terminateLater
     }
 }
