@@ -2,6 +2,8 @@
 # Builds "SC LIVE 4 Emulator.app" (Apple Silicon and Intel) from SCLive4Emulator.swift.
 # Needs Xcode or the Command Line Tools (xcode-select --install; Homebrew installs them too).
 #   mac/app/build.sh [OUTDIR]      default OUTDIR: mac/app/build
+# BUILD_COMMIT (the release build sets it to the git commit) is what the app compares with the
+# release's version.txt to update itself; a local build is "dev" and never replaces itself.
 set -euo pipefail
 cd "$(dirname "$0")"
 OUT=${1:-build}
@@ -10,13 +12,16 @@ mkdir -p "$OUT"
 rm -rf "$APP" "$OUT/AppIcon.iconset"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
+printf 'enum BuildInfo { static let commit = "%s" }\n' "${BUILD_COMMIT:-dev}" > "$OUT/BuildInfo.swift"
 for arch in arm64 x86_64; do
-    swiftc -O -parse-as-library -target "$arch-apple-macos13.0" -o "$OUT/SCLive4Emulator-$arch" SCLive4Emulator.swift
+    swiftc -O -parse-as-library -target "$arch-apple-macos13.0" -o "$OUT/SCLive4Emulator-$arch" \
+        SCLive4Emulator.swift "$OUT/BuildInfo.swift"
 done
 lipo -create -output "$APP/Contents/MacOS/SCLive4Emulator" "$OUT"/SCLive4Emulator-arm64 "$OUT"/SCLive4Emulator-x86_64
 rm -f "$OUT"/SCLive4Emulator-arm64 "$OUT"/SCLive4Emulator-x86_64
 
 cp Info.plist "$APP/Contents/Info.plist"
+[ "${BUILD_COMMIT:-dev}" = dev ] || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_COMMIT:0:7}" "$APP/Contents/Info.plist"
 # The launcher and the VM definition travel inside the app.
 cp ../sclive4-emu ../lima.yaml "$APP/Contents/Resources/"
 chmod 755 "$APP/Contents/Resources/sclive4-emu"
