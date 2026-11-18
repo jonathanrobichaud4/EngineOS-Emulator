@@ -28,7 +28,7 @@ enum AppInfo {
     private static let migrated: Void = {
         let d = UserDefaults.standard
         guard !d.bool(forKey: "migratedFromSCLive4"),
-              let old = UserDefaults(suiteName: "io.github.jonathanrobichaud4.engineos-emulator") else { return }
+              let old = UserDefaults(suiteName: "io.github.jonathanrobichaud4.sclive4-emulator") else { return }
         for k in ["autoStart", "openDeck", "autoUpdate", "softwareRender", "autoUpdateApp", "deck"]
             where d.object(forKey: k) == nil {
             if let v = old.object(forKey: k) { d.set(v, forKey: k) }
@@ -351,7 +351,7 @@ final class Model: ObservableObject {
     /// The app is published as the "mac-app" release, with version.txt holding the commit it
     /// was built from. A different commit there means a newer build: download it, swap this
     /// app's bundle for it once the app has quit, and open it again.
-    static let release = "https://github.com/jonathanrobichaud4/engineos-emulator/releases/download/mac-app/"
+    static let release = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/"
 
     func checkAppUpdate(manual: Bool) {
         guard BuildInfo.commit != "dev" else {

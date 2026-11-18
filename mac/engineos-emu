@@ -40,7 +40,7 @@ SHARE="$HOME/EngineOSEmulator"
 [ ! -e "$SHARE" ] && [ -d "$OLD_SHARE" ] && SHARE=$OLD_SHARE
 # emu.sh in the VM: the new place, or the old one on a VM that hasn't been migrated yet.
 EMU_SH='d=/opt/engineos-emulator; [ -x "$d/emu.sh" ] || d=/opt/sclive4-emulator; exec "$d/emu.sh" "$@"'
-REPO=https://github.com/jonathanrobichaud4/sclive4-emulator
+REPO=https://github.com/jonathanrobichaud4/EngineOS-Emulator
 DECK_URL=http://localhost:8090/
 CONSOLE_URL=http://localhost:8080/
 
@@ -172,7 +172,10 @@ update)
     fi
     need_vm
     say "updating the emulator in the VM"
-    vm sudo sh -c "[ -d /opt/engineos-emulator/.git ] || git clone $REPO /opt/engineos-emulator; git -C /opt/engineos-emulator pull --ff-only"
+    # Clones from before the repository was renamed get its new address.
+    vm sudo sh -c "[ -d /opt/engineos-emulator/.git ] || git clone $REPO /opt/engineos-emulator
+        case \$(git -C /opt/engineos-emulator remote get-url origin) in *jonathanrobichaud4/sclive4-emulator*) git -C /opt/engineos-emulator remote set-url origin $REPO ;; esac
+        git -C /opt/engineos-emulator pull --ff-only"
     ;;
 vm-stop)
     need_lima

@@ -55,7 +55,7 @@ provision:
       export DEBIAN_FRONTEND=noninteractive
       command -v git >/dev/null || { apt-get update -qq; apt-get install -y -qq git; }
       [ -d /opt/engineos-emulator/.git ] || [ -d /opt/sclive4-emulator/.git ] ||
-        git clone https://github.com/jonathanrobichaud4/sclive4-emulator /opt/engineos-emulator
+        git clone https://github.com/jonathanrobichaud4/EngineOS-Emulator /opt/engineos-emulator
 
 message: |
   The EngineOS Emulator VM is ready. Next:

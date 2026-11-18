@@ -9,7 +9,7 @@
 //   music files            copied to an emulator music folder that is plugged in as a drive
 //
 // Everything runs as root in the WSL distro through wsl.exe, so no passwords are asked. The
-// emulator itself is the GitHub repo jonathanrobichaud4/sclive4-emulator; this app can install
+// emulator itself is the GitHub repo jonathanrobichaud4/EngineOS-Emulator; this app can install
 // WSL and the emulator, and update the emulator with git pull.
 //
 // Builds against .NET Framework 4.x (included in Windows 10/11): see build.sh next to this file.
@@ -65,7 +65,7 @@ namespace EngineOSEmulator
     // ------------------------------------------------------------------------------- WSL
     class Wsl
     {
-        public const string RepoUrl = "https://github.com/jonathanrobichaud4/sclive4-emulator";
+        public const string RepoUrl = "https://github.com/jonathanrobichaud4/EngineOS-Emulator";
         public string Distro = "";   // empty = WSL's default distro
         public string EmuDir = "";   // where emu.sh lives inside WSL
 
@@ -845,7 +845,7 @@ namespace EngineOSEmulator
         // commit it was built from (BuildInfo.Commit, set by windows/build.sh). A different commit
         // there means a newer build: download it next to this one, and once this app has quit, a
         // small batch file moves it into place and starts it. Local builds ("dev") never update.
-        const string AppRelease = "https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/";
+        const string AppRelease = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/";
 
         async Task CheckAppUpdate(bool manual)
         {
@@ -908,6 +908,8 @@ namespace EngineOSEmulator
                 "cd " + dir + " || exit 1\n" +
                 "git rev-parse --git-dir >/dev/null 2>&1 || { echo 'not a git checkout, skipping update'; exit 0; }\n" +
                 "git config --global --add safe.directory " + dir + " 2>/dev/null\n" +
+                // Clones from before the repository was renamed get its new address.
+                "case $(git remote get-url origin) in *jonathanrobichaud4/sclive4-emulator*) git remote set-url origin " + Wsl.RepoUrl + " ;; esac\n" +
                 "before=$(git rev-parse --short HEAD)\n" +
                 "git fetch -q origin || { echo 'update check failed (no internet in WSL?)'; exit 1; }\n" +
                 "br=$(git rev-parse --abbrev-ref HEAD)\n" +

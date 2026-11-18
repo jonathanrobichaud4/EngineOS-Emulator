@@ -25,7 +25,7 @@ Not emulated yet:
 
 ## Windows app (no command line)
 
-`EngineOSEmulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/EngineOSEmulator.exe) (the [Windows app release](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/tag/windows-app), rebuilt on every change) and run it; it needs nothing installed beyond Windows 10 or 11.
+`EngineOSEmulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/EngineOSEmulator.exe) (the [Windows app release](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/tag/windows-app), rebuilt on every change) and run it; it needs nothing installed beyond Windows 10 or 11.
 
 - It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/engineos-emulator` in Ubuntu), and finds an older copy and moves your deck over.
 - **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\EngineOS Emulator`, which is plugged in as the EMULATOR drive.
@@ -39,12 +39,12 @@ Installed copies from before the rename to EngineOS Emulator update into the new
 
 The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows.
 
-**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/EngineOSEmulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
+**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/EngineOSEmulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
 
 **From Terminal**, `mac/engineos-emu` does the same:
 
 ```sh
-git clone https://github.com/jonathanrobichaud4/sclive4-emulator engineos-emulator
+git clone https://github.com/jonathanrobichaud4/EngineOS-Emulator engineos-emulator
 cd engineos-emulator/mac
 ./engineos-emu install                                  # installs Lima (Homebrew) and creates the VM
 ./engineos-emu setup ~/Downloads/<SC LIVE 4 firmware>   # .img, Windows .exe or Mac .zip updater
@@ -70,7 +70,7 @@ Not yet tried on a real Mac: the Linux side is the same as on WSL, but the Lima 
 In the Ubuntu terminal:
 
 ```sh
-git clone https://github.com/jonathanrobichaud4/sclive4-emulator ~/engineos-emulator
+git clone https://github.com/jonathanrobichaud4/EngineOS-Emulator ~/engineos-emulator
 cd ~/engineos-emulator
 sudo ./emu.sh setup /mnt/c/Users/<you>/Downloads/<firmware>.img \
                     /mnt/c/Users/<you>/Downloads/SCLIVE4-5.3.0.4-EngineX-OS-Data-Bundle.tar.gz

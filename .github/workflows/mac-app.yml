@@ -1,5 +1,5 @@
 # Builds the Mac app on a macOS runner and publishes it as the "mac-app" release:
-# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/EngineOSEmulator-mac.zip
+# https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/EngineOSEmulator-mac.zip
 name: Mac app
 on:
   push:

@@ -1,5 +1,5 @@
 # Builds the Windows app with Mono and publishes it as the "windows-app" release:
-# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/EngineOSEmulator.exe
+# https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/EngineOSEmulator.exe
 name: Windows app
 on:
   push:
