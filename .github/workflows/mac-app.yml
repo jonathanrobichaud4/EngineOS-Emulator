@@ -34,12 +34,7 @@ jobs:
           sleep 8
           osascript -e 'tell application "System Events" to set frontmost of (first process whose name is "SCLive4Emulator") to true' || true
           sleep 2
-          screencapture -x screenshot-full.png
-          # Just the app's window if its bounds can be read, else the whole screen.
-          b=$(osascript -e 'tell application "System Events" to tell (first process whose name is "SCLive4Emulator") to get {position, size} of window 1' 2>/dev/null | tr -d ' ') || b=
-          if [ -n "$b" ]; then IFS=, read -r x y w h <<< "$b"; s=$(python3 -c 'import sys;print(2)' ); \
-            sips -c $((h * 2)) $((w * 2)) --cropOffset $((y * 2)) $((x * 2)) screenshot-full.png --out screenshot.png >/dev/null 2>&1 || cp screenshot-full.png screenshot.png; \
-          else cp screenshot-full.png screenshot.png; fi
+          screencapture -x screenshot.png
           pkill -x SCLive4Emulator || true
       - name: Package
         run: ditto -c -k --keepParent "build/SC LIVE 4 Emulator.app" SCLive4Emulator-mac.zip
@@ -54,4 +49,4 @@ jobs:
           gh release view mac-app >/dev/null 2>&1 ||
             gh release create mac-app --title "Mac app" --notes "The SC LIVE 4 Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Unzip, move it to Applications, then right-click > Open the first time."
           gh release upload mac-app SCLive4Emulator-mac.zip --clobber
-          [ -f screenshot.png ] && gh release upload mac-app screenshot.png screenshot-full.png --clobber || true
+          [ -f screenshot.png ] && gh release upload mac-app screenshot.png --clobber || true

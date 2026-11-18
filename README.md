@@ -33,7 +33,11 @@ Windows may warn the first time ("Windows protected your PC") because the progra
 
 ## macOS (Apple Silicon or Intel)
 
-The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows. `mac/sclive4-emu` does all of it from Terminal:
+The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows.
+
+**The app:** [download SC LIVE 4 Emulator for Mac](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/SCLive4Emulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
+
+**From Terminal**, `mac/sclive4-emu` does the same:
 
 ```sh
 git clone https://github.com/jonathanrobichaud4/sclive4-emulator
