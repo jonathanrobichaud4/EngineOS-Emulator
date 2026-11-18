@@ -49,7 +49,7 @@ cd sclive4-emulator/mac
 - It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`mac/lima.yaml` sets these).
 - On Apple Silicon the VM is ARM64 Linux. Apple's chips can't run Engine's 32-bit ARM code directly, so it still goes through qemu-arm, as on a PC.
 
-Not yet tried on a real Mac: the Linux side is the same as on WSL, but the Lima VM and the launcher were only checked by dry runs. Tell me what breaks.
+Not yet tried on a real Mac: the Linux side is the same as on WSL, but the Lima VM and the launcher have only been checked with dry runs.
 
 ## What you need
 
