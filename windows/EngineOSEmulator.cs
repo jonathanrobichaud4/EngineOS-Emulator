@@ -28,17 +28,23 @@ using System.Windows.Forms;
 
 namespace EngineOSEmulator
 {
-    // The app's name, in one place. Settings and drive folders from before the rename keep
-    // being used if they exist, so an update keeps everything.
+    // The app's name, in one place, and the folders from before the rename (SC LIVE 4 Emulator),
+    // which are moved to the new names the first time they're used.
     static class AppInfo
     {
         public const string Name = "EngineOS Emulator";
         public const string OldName = "SC LIVE 4 Emulator";
         public const string Exe = "EngineOSEmulator.exe";
+        public const string EmuDir = "/opt/engineos-emulator";
+        public const string OldEmuDir = "/opt/sclive4-emulator";
         public static string Folder(Environment.SpecialFolder root)
         {
-            string b = Environment.GetFolderPath(root), old = Path.Combine(b, OldName);
-            return Directory.Exists(old) ? old : Path.Combine(b, Name);
+            string b = Environment.GetFolderPath(root), old = Path.Combine(b, OldName), now = Path.Combine(b, Name);
+            if (Directory.Exists(old) && !Directory.Exists(now))
+            {
+                try { Directory.Move(old, now); } catch { return old; }   // in use: try again next time
+            }
+            return now;
         }
     }
 
@@ -601,10 +607,16 @@ namespace EngineOSEmulator
 
             string emuDir;
             settings.TryGetValue("EmuDir", out emuDir);
+            // An install from before the rename: /opt/sclive4-emulator becomes /opt/engineos-emulator
+            // (with a link at the old path), once no deck is running from it.
+            await wsl.Run("o=" + AppInfo.OldEmuDir + " d=" + AppInfo.EmuDir + "; " +
+                "if [ -d \"$o\" ] && [ ! -L \"$o\" ] && [ ! -e \"$d\" ] && ! grep -q \" $o/\" /proc/mounts; then " +
+                "mv \"$o\" \"$d\" && ln -s \"$d\" \"$o\" && echo \"Moved $o to $d.\"; fi", Log);
+            if (emuDir == AppInfo.OldEmuDir) emuDir = AppInfo.EmuDir;
             // A current emulator has the commands this app uses (info, profiles, identify, mod-install).
             string found = (await wsl.Capture(
                 "for d in " + (string.IsNullOrEmpty(emuDir) ? "" : Wsl.Q(emuDir) + " ") +
-                "/opt/sclive4-emulator /root/sclive4-emulator /home/*/sclive4-emulator /home/*/enginex-emu; do " +
+                AppInfo.EmuDir + " " + AppInfo.OldEmuDir + " /root/sclive4-emulator /home/*/sclive4-emulator /home/*/enginex-emu; do " +
                 "[ -x \"$d/emu.sh\" ] || continue; " +
                 "if grep -q '^cmd_info()' \"$d/emu.sh\"; then echo \"current $d\"; else echo \"old $d\"; fi; done")).Trim();
             var lines = found.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
@@ -614,13 +626,13 @@ namespace EngineOSEmulator
             {
                 legacyDir = older.Substring(4);
                 ShowSetup("Found an older copy of the emulator in " + legacyDir + ". This app needs the current one: it'll be installed in " +
-                          "/opt/sclive4-emulator and your deck, settings and drives moved over.", "Update emulator");
+                          AppInfo.EmuDir + " and your deck, settings and drives moved over.", "Update emulator");
                 statusLabel.Text = "Emulator needs updating";
                 return;
             }
             if (current == null)
             {
-                ShowSetup("The emulator isn't installed in WSL (" + wsl.Distro + ") yet. It'll be downloaded from GitHub into /opt/sclive4-emulator.",
+                ShowSetup("The emulator isn't installed in WSL (" + wsl.Distro + ") yet. It'll be downloaded from GitHub into " + AppInfo.EmuDir + ".",
                           "Install emulator");
                 statusLabel.Text = "Emulator not installed";
                 return;
@@ -671,13 +683,13 @@ namespace EngineOSEmulator
                 int mrc = await wsl.Run(
                     "set -e; command -v git >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git; }; " +
                     o + "/emu.sh stop >/dev/null 2>&1 || :; " +
-                    "[ -d /opt/sclive4-emulator/.git ] || git clone " + Wsl.RepoUrl + " /opt/sclive4-emulator; " +
+                    "[ -d " + AppInfo.EmuDir + "/.git ] || git clone " + Wsl.RepoUrl + " " + AppInfo.EmuDir + "; " +
                     "for x in rootfs state drives.txt; do " +
-                    "  if [ -e " + o + "/$x ] && [ ! -e /opt/sclive4-emulator/$x ]; then mv " + o + "/$x /opt/sclive4-emulator/ && echo \"moved $x\"; fi; " +
+                    "  if [ -e " + o + "/$x ] && [ ! -e " + AppInfo.EmuDir + "/$x ]; then mv " + o + "/$x " + AppInfo.EmuDir + "/ && echo \"moved $x\"; fi; " +
                     "done; echo 'Done. The old folder " + legacyDir.Replace("'", "") + " can be deleted.'", Log);
                 SetBusy(false);
                 legacyDir = "";
-                settings["EmuDir"] = "/opt/sclive4-emulator";
+                settings["EmuDir"] = AppInfo.EmuDir;
                 Settings.Save(settings);
                 if (mrc == 0) await Init(); else Log("Updating failed; see above.");
                 return;
@@ -687,7 +699,7 @@ namespace EngineOSEmulator
                 SetBusy(true, "Installing the emulator");
                 int rc = await wsl.Run(
                     "set -e; command -v git >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git; }; " +
-                    "git clone " + Wsl.RepoUrl + " /opt/sclive4-emulator && echo 'Installed in /opt/sclive4-emulator.'", Log);
+                    "git clone " + Wsl.RepoUrl + " " + AppInfo.EmuDir + " && echo 'Installed in " + AppInfo.EmuDir + ".'", Log);
                 SetBusy(false);
                 if (rc == 0) await Init();
                 else Log("Installing the emulator failed; see above.");
@@ -900,7 +912,7 @@ namespace EngineOSEmulator
                 "git fetch -q origin || { echo 'update check failed (no internet in WSL?)'; exit 1; }\n" +
                 "br=$(git rev-parse --abbrev-ref HEAD)\n" +
                 "if ! git merge -q --ff-only origin/$br 2>/dev/null; then\n" +
-                (wsl.EmuDir == "/opt/sclive4-emulator"
+                (wsl.EmuDir == AppInfo.EmuDir || wsl.EmuDir == AppInfo.OldEmuDir
                     ? "  echo 'local changes were in the way; resetting to the GitHub version'; git reset -q --hard origin/$br\n"
                     : "  echo 'could not fast-forward (local changes?); run git pull in '" + dir + "' yourself'; exit 1\n") +
                 "fi\n" +

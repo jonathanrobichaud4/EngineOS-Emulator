@@ -4,7 +4,7 @@
 <dict>
 	<key>CFBundleName</key><string>EngineOS Emulator</string>
 	<key>CFBundleDisplayName</key><string>EngineOS Emulator</string>
-	<key>CFBundleIdentifier</key><string>io.github.jonathanrobichaud4.sclive4-emulator</string>
+	<key>CFBundleIdentifier</key><string>io.github.jonathanrobichaud4.engineos-emulator</string>
 	<key>CFBundleExecutable</key><string>EngineOSEmulator</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>

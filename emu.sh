@@ -1,8 +1,8 @@
 #!/bin/bash
-# EngineX emulator for SC LIVE 4 (JP21). Runs the real ARM Engine binary from the stock
+# EngineOS Emulator: emulates the SC LIVE 4 (JP21). Runs the real ARM Engine binary from the stock
 # firmware under qemu-user in a chroot, with EngineX's hook preloaded. The browser page shows
 # the whole deck: touchscreen, every control (as the internal MIDI control surface), LEDs and
-# audio out. Meant for WSL2 (Ubuntu), any x86_64 or ARM64 Linux, or macOS through mac/sclive4-emu
+# audio out. Meant for WSL2 (Ubuntu), any x86_64 or ARM64 Linux, or macOS through mac/engineos-emu
 # (a Lima VM).
 #
 #   sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]   build ./rootfs (once per firmware)
@@ -362,7 +362,7 @@ install_bundle() {
 cmd_setup() {
     need_root
     local fw=${1:-}; [ -f "$fw" ] || die "usage: sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]"
-    case "$R" in /mnt/[a-z]/*) die "keep the emulator folder in your Linux home (e.g. ~/enginex-emu), not on a Windows drive under /mnt: the rootfs needs Linux permissions and symlinks" ;; esac
+    case "$R" in /mnt/[a-z]/*) die "keep the emulator folder in your Linux home (e.g. ~/engineos-emulator), not on a Windows drive under /mnt: the rootfs needs Linux permissions and symlinks" ;; esac
     deps
     [ ! -e "$R/usr/Engine/Engine" ] || { cmd_stop >/dev/null 2>&1 || :; say "replacing existing rootfs"; mounts_down; rm -rf "$R"; }
     mkdir -p "$STATE"
@@ -668,6 +668,21 @@ case "${1:-}" in
             EMU_OWN_SESSION=1 EMU_PROFILE=${PROFILE:-default} exec setsid -w "$HERE/emu.sh" "$@"
         fi ;;
 esac
+
+# Drive folders from before the rename to EngineOS Emulator (~/SCLive4Emulator on a Mac,
+# Music\SC LIVE 4 Emulator on Windows) are moved by the apps; point drives.txt at the new place.
+migrate_drive_paths() {
+    local f="$HERE/drives.txt" line out= changed=
+    [ -s "$f" ] && [ -w "$f" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        local new
+        new=$(printf '%s\n' "$line" | sed -E 's#/SCLive4Emulator(/|$)#/EngineOSEmulator\1#; s#/SC LIVE 4 Emulator(/|$)#/EngineOS Emulator\1#')
+        if [ "$new" != "$line" ] && [ -d "${new##*$'\t'}" ]; then line=$new; changed=1; fi
+        out+="$line"$'\n'
+    done < "$f"
+    [ -z "$changed" ] || printf %s "$out" > "$f"
+}
+migrate_drive_paths
 
 case "${1:-}" in
     setup) shift; cmd_setup "$@" ;;

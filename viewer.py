@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EngineX emulator viewer: the emulated SC LIVE 4 in a browser.
+"""EngineOS Emulator viewer: the emulated deck in a browser.
 
 Serves http://localhost:PORT/ with the deck's top panel: the touchscreen in the middle (frames
 from the shim in Engine) and every control around it, wired to Engine as the deck's internal
@@ -623,7 +623,7 @@ def main():
             else:
                 self.reply(404)
 
-    print(f"EngineX emulator viewer: http://localhost:{a.port}/", flush=True)
+    print(f"EngineOS Emulator viewer: http://localhost:{a.port}/", flush=True)
     for f in a.forward:
         lp, tgt = f.split("=", 1)
         forward(int(lp), tgt)

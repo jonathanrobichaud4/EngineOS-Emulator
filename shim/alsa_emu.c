@@ -1,4 +1,4 @@
-/* alsa_emu.c - ALSA stand-in for the EngineX emulator (part of libemushim.so).
+/* alsa_emu.c - ALSA stand-in for EngineOS Emulator (part of libemushim.so).
  *
  * WSL2 has no sound drivers, and qemu-user couldn't translate ALSA ioctls anyway, so the
  * libasound calls Engine makes are answered here instead:

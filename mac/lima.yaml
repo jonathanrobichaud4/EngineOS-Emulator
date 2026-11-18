@@ -1,16 +1,16 @@
-# Lima VM for the SC LIVE 4 emulator on macOS (used by mac/sclive4-emu).
+# Lima VM for EngineOS Emulator on macOS (used by mac/engineos-emu).
 #
 # The emulator needs Linux: qemu-user, chroot and network namespaces. On a Mac it runs in this
 # small Ubuntu VM, the same way it runs in WSL on Windows. On Apple Silicon the VM is ARM64
 # Linux under Apple's Virtualization framework; Engine's 32-bit ARM code still goes through
 # qemu-arm (Apple's chips can't run 32-bit ARM), registered by emu.sh itself.
 #
-# The emulator lives in the VM at /opt/sclive4-emulator (a git clone, updated with
-# "sclive4-emu update"). Its deck files stay on the VM's own disk, since the deck's root
+# The emulator lives in the VM at /opt/engineos-emulator (a git clone, updated with
+# "engineos-emu update"). Its deck files stay on the VM's own disk, since the deck's root
 # filesystem needs Linux permissions and device nodes.
 #
 # Your home folder is visible in the VM at the same path, read-only, so the launcher can hand
-# emu.sh a firmware file without copying it. ~/SCLive4Emulator is writable: folders plugged in
+# emu.sh a firmware file without copying it. ~/EngineOSEmulator is writable: folders plugged in
 # as USB drives should live there, because Engine writes its library onto the drive.
 
 vmType: vz
@@ -27,7 +27,7 @@ images:
 mounts:
   - location: "~"
     writable: false
-  - location: "~/SCLive4Emulator"
+  - location: "~/EngineOSEmulator"
     writable: true
 
 mountType: virtiofs
@@ -54,10 +54,10 @@ provision:
       set -eux -o pipefail
       export DEBIAN_FRONTEND=noninteractive
       command -v git >/dev/null || { apt-get update -qq; apt-get install -y -qq git; }
-      [ -d /opt/sclive4-emulator/.git ] ||
-        git clone https://github.com/jonathanrobichaud4/sclive4-emulator /opt/sclive4-emulator
+      [ -d /opt/engineos-emulator/.git ] || [ -d /opt/sclive4-emulator/.git ] ||
+        git clone https://github.com/jonathanrobichaud4/sclive4-emulator /opt/engineos-emulator
 
 message: |
-  The SC LIVE 4 emulator VM is ready. Next:
-    sclive4-emu setup ~/Downloads/<SC LIVE 4 firmware>
-    sclive4-emu start
+  The EngineOS Emulator VM is ready. Next:
+    engineos-emu setup ~/Downloads/<SC LIVE 4 firmware>
+    engineos-emu start

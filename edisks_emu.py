@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stand-in for the deck's edisksd (io.github.inmusicdev.edisksd) for the EngineX emulator.
+"""Stand-in for the deck's edisksd (io.github.inmusicdev.edisksd) for EngineOS Emulator.
 
 On the deck, edisksd watches USB sticks and SD cards and mounts them under /media/<label> when
 Engine asks. Engine only talks to it over D-Bus, so this service answers on the emulated deck's

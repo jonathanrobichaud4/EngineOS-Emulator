@@ -25,8 +25,8 @@ rm -f "$OUT/$BIN-arm64" "$OUT/$BIN-x86_64"
 cp Info.plist "$APP/Contents/Info.plist"
 [ "${BUILD_COMMIT:-dev}" = dev ] || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_COMMIT:0:7}" "$APP/Contents/Info.plist"
 # The launcher and the VM definition travel inside the app.
-cp ../sclive4-emu ../lima.yaml "$APP/Contents/Resources/"
-chmod 755 "$APP/Contents/Resources/sclive4-emu"
+cp ../engineos-emu ../lima.yaml "$APP/Contents/Resources/"
+chmod 755 "$APP/Contents/Resources/engineos-emu"
 
 # Icon: every size macOS wants, from icon.png (1024 x 1024).
 set_ico="$OUT/AppIcon.iconset"; mkdir -p "$set_ico"

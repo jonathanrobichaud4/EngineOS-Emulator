@@ -1,4 +1,4 @@
-/* EngineX emulator shim, preloaded into Engine under qemu-user.
+/* EngineOS Emulator shim, preloaded into Engine under qemu-user.
  *
  * 1. Thread affinity, real-time locking: the PC has a different CPU layout and
  *    qemu passes masks to the host, so pinning to a deck core can fail and

@@ -1,5 +1,5 @@
 // EngineOS Emulator for macOS: a window for the emulator, which runs in a Lima Linux VM.
-// Everything goes through the bundled `sclive4-emu` launcher (Contents/Resources), the same
+// Everything goes through the bundled `engineos-emu` launcher (Contents/Resources), the same
 // commands you'd type in Terminal. The app shows the deck's state, starts and stops it, takes
 // dropped files (firmware, EngineX bundle, mod, music folder), and shows what it's doing.
 //
@@ -8,11 +8,38 @@
 import AppKit
 import SwiftUI
 
-/// The app's name, in one place. (Folder, VM and bundle-id names stay as they were so
-/// existing installs keep their decks and settings.)
+/// The app's name, in one place, and what carries over from before the rename (SC LIVE 4
+/// Emulator): its settings, and its drive folder until the launcher moves it.
 enum AppInfo {
     static let name = "EngineOS Emulator"
     static let zip = "EngineOSEmulator-mac.zip"
+    static let script = "engineos-emu"
+
+    /// ~/EngineOSEmulator, or ~/SCLive4Emulator on an older install whose VM hasn't restarted
+    /// since (engineos-emu moves it then).
+    static var share: URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let new = home.appendingPathComponent("EngineOSEmulator"), old = home.appendingPathComponent("SCLive4Emulator")
+        let fm = FileManager.default
+        return !fm.fileExists(atPath: new.path) && fm.fileExists(atPath: old.path) ? old : new
+    }
+
+    /// Settings saved under the old bundle id, copied over once.
+    private static let migrated: Void = {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "migratedFromSCLive4"),
+              let old = UserDefaults(suiteName: "io.github.jonathanrobichaud4.engineos-emulator") else { return }
+        for k in ["autoStart", "openDeck", "autoUpdate", "softwareRender", "autoUpdateApp", "deck"]
+            where d.object(forKey: k) == nil {
+            if let v = old.object(forKey: k) { d.set(v, forKey: k) }
+        }
+        d.set(true, forKey: "migratedFromSCLive4")
+    }()
+
+    static func savedDeck() -> String {
+        _ = migrated
+        return UserDefaults.standard.string(forKey: "deck") ?? "default"
+    }
 }
 import UniformTypeIdentifiers
 
@@ -47,7 +74,7 @@ final class Model: ObservableObject {
     @AppStorage("autoUpdateApp") var autoUpdateApp = true
 
     /// The selected deck ("default" is emu.sh's unnamed profile).
-    @Published var deck: String = UserDefaults.standard.string(forKey: "deck") ?? "default" {
+    @Published var deck: String = AppInfo.savedDeck() {
         didSet { UserDefaults.standard.set(deck, forKey: "deck"); state = [:]; refresh() }
     }
     @Published var decks: [DeckInfo] = []
@@ -58,21 +85,21 @@ final class Model: ObservableObject {
     private var timer: Timer?
     private var started = false
 
-    let script: String = Bundle.main.path(forResource: "sclive4-emu", ofType: nil) ?? ""
-    let share = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("SCLive4Emulator")
+    let script: String = Bundle.main.path(forResource: AppInfo.script, ofType: nil) ?? ""
+    var share: URL { AppInfo.share }
 
     var env: [String: String] {
         var e = ProcessInfo.processInfo.environment
         e["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         e["NO_COLOR"] = "1"
-        e["SCLIVE4_NO_OPEN"] = "1"   // the app opens the deck page itself, once
+        e["ENGINEOS_NO_OPEN"] = "1"   // the app opens the deck page itself, once
         return e
     }
 
     func launch() {
         guard !started else { return }
         started = true
-        if script.isEmpty { append("The app is missing its sclive4-emu script; rebuild it with mac/app/build.sh.\n") }
+        if script.isEmpty { append("The app is missing its engineos-emu script; rebuild it with mac/app/build.sh.\n") }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { [weak self] _ in self?.refresh() }
         if autoUpdateApp { checkAppUpdate(manual: false) }
@@ -88,7 +115,7 @@ final class Model: ObservableObject {
         }
     }
 
-    // State, from `sclive4-emu state` (never starts the VM).
+    // State, from `engineos-emu state` (never starts the VM).
     var lima: Bool { state["lima"] == "yes" }
     var brew: Bool { state["brew"] != "no" }
     var vm: String { state["vm"] ?? "" }
@@ -161,7 +188,7 @@ final class Model: ObservableObject {
         return all
     }
 
-    /// Runs `sclive4-emu [--profile DECK] args...`, streaming its output into the log. One at a time.
+    /// Runs `engineos-emu [--profile DECK] args...`, streaming its output into the log. One at a time.
     /// Commands about the VM or the app itself don't take a deck.
     func run(_ args: [String], title: String, profile: String? = nil, done: ((Int32) -> Void)? = nil) {
         let vmWide: Set<String> = ["install", "update", "vm-stop", "uninstall"]
@@ -207,7 +234,7 @@ final class Model: ObservableObject {
         } catch {
             busy = false
             task = ""
-            append("Couldn't run sclive4-emu: \(error.localizedDescription)\n")
+            append("Couldn't run engineos-emu: \(error.localizedDescription)\n")
         }
     }
 
@@ -324,7 +351,7 @@ final class Model: ObservableObject {
     /// The app is published as the "mac-app" release, with version.txt holding the commit it
     /// was built from. A different commit there means a newer build: download it, swap this
     /// app's bundle for it once the app has quit, and open it again.
-    static let release = "https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/"
+    static let release = "https://github.com/jonathanrobichaud4/engineos-emulator/releases/download/mac-app/"
 
     func checkAppUpdate(manual: Bool) {
         guard BuildInfo.commit != "dev" else {
@@ -356,7 +383,7 @@ final class Model: ObservableObject {
             let fail = { (why: String) in DispatchQueue.main.async { self.append("App update failed: \(why)\n") } }
             guard let tmp = tmp, (resp as? HTTPURLResponse)?.statusCode == 200 else { fail(err?.localizedDescription ?? "download failed"); return }
             let fm = FileManager.default
-            let work = fm.temporaryDirectory.appendingPathComponent("sclive4-update-\(UUID().uuidString)")
+            let work = fm.temporaryDirectory.appendingPathComponent("engineos-update-\(UUID().uuidString)")
             do {
                 try fm.createDirectory(at: work, withIntermediateDirectories: true)
                 let zip = work.appendingPathComponent("app.zip")
@@ -444,14 +471,14 @@ final class Model: ObservableObject {
         }
     }
 
-    /// Engine writes its library onto a drive, and only ~/SCLive4Emulator is writable from the VM,
+    /// Engine writes its library onto a drive, and only ~/EngineOSEmulator is writable from the VM,
     /// so a folder elsewhere is copied there first (or used read-only).
     func addDrive(_ url: URL) {
         let inside = url.standardizedFileURL.path.hasPrefix(share.standardizedFileURL.path + "/")
         if inside { run(["drive", "add", url.path], title: "Plugging in \(url.lastPathComponent) as a USB drive"); return }
         let a = NSAlert()
-        a.messageText = "Copy \"\(url.lastPathComponent)\" into ~/SCLive4Emulator?"
-        a.informativeText = "Engine writes its library onto the drive, and the emulator can only write inside ~/SCLive4Emulator. You can also plug it in as is, read-only (Engine then can't keep a library on it)."
+        a.messageText = "Copy \"\(url.lastPathComponent)\" into \(share.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))?"
+        a.informativeText = "Engine writes its library onto the drive, and the emulator can only write inside \(share.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")). You can also plug it in as is, read-only (Engine then can't keep a library on it)."
         a.addButton(withTitle: "Copy and plug in")
         a.addButton(withTitle: "Use read-only")
         a.addButton(withTitle: "Cancel")
@@ -576,7 +603,7 @@ struct ContentView: View {
                 Button("Check for app updates") { m.checkAppUpdate(manual: true) }
                 Button("Reset the deck's data...") { m.resetData() }
                 Divider()
-                Button("Open ~/SCLive4Emulator") {
+                Button("Open Drives Folder") {
                     try? FileManager.default.createDirectory(at: m.share, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(m.share)
                 }

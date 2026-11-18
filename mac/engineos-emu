@@ -1,0 +1,213 @@
+#!/bin/bash
+# EngineOS Emulator for macOS: runs the emulator in a small Lima Linux VM (mac/lima.yaml) and
+# opens the deck in your browser. The Mac counterpart of the Windows app, as a command.
+#
+#   engineos-emu [--profile DECK] COMMAND ...  DECK: which deck (emu.sh profiles; default: "default").
+#                                            Decks live side by side in the VM, one runs at a time.
+#   engineos-emu install                      install Lima (Homebrew) and create the VM
+#   engineos-emu setup FIRMWARE [BUNDLE]      build the deck from a firmware file (SC LIVE 4)
+#   engineos-emu start [--stock]              start the deck and open http://localhost:8090
+#   engineos-emu stop | restart | status | log
+#   engineos-emu open | console               open the deck page / the EngineX console
+#   engineos-emu drive add FOLDER [--sd]      plug a folder in as a USB drive (see below)
+#   engineos-emu enginex BUNDLE               install an EngineX data bundle (.tar.gz)
+#   engineos-emu mod-install MOD              install and enable a mod (.tar.gz)
+#   engineos-emu update                       update the emulator (in the VM and this folder)
+#   engineos-emu vm-stop                      stop the VM itself (frees its memory)
+#   engineos-emu uninstall [--yes]            delete the VM and everything in it
+#   engineos-emu state                        key=value lines for the Mac app (never starts the VM),
+#                                            with deck=NAME<TAB>set up<TAB>EngineX<TAB>running lines
+#   engineos-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
+#                                            shell, info, profiles, identify, reset-data, ...)
+#
+# Files: your home folder is visible in the VM read-only, at the same path, so FIRMWARE can be
+# anywhere in it (Downloads is fine). A folder used as a drive has to be writable, because
+# Engine writes its library onto the drive: keep it in ~/EngineOSEmulator, which the VM can
+# write to. Files outside your home folder are copied into ~/EngineOSEmulator first.
+#
+# Settings: ENGINEOS_VM (VM name, default engineos-emu).
+#
+# Installs from before the rename (SC LIVE 4 Emulator) keep working: their VM "sclive4-emu" is
+# used as is, ~/SCLive4Emulator becomes ~/EngineOSEmulator the next time the VM starts, and in
+# the VM /opt/sclive4-emulator moves to /opt/engineos-emulator (with a link at the old path).
+
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+YAML="$HERE/lima.yaml"
+OLD_SHARE="$HOME/SCLive4Emulator"
+SHARE="$HOME/EngineOSEmulator"
+# Until the old VM next starts, its writable folder is still the old one.
+[ ! -e "$SHARE" ] && [ -d "$OLD_SHARE" ] && SHARE=$OLD_SHARE
+# emu.sh in the VM: the new place, or the old one on a VM that hasn't been migrated yet.
+EMU_SH='d=/opt/engineos-emulator; [ -x "$d/emu.sh" ] || d=/opt/sclive4-emulator; exec "$d/emu.sh" "$@"'
+REPO=https://github.com/jonathanrobichaud4/sclive4-emulator
+DECK_URL=http://localhost:8090/
+CONSOLE_URL=http://localhost:8080/
+
+# Homebrew's places too, since an app started from Finder doesn't get the shell's PATH.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
+
+say() { printf '%s\n' "engineos-emu: $*"; }
+die() { printf '%s\n' "engineos-emu: $*" >&2; exit 1; }
+
+[ "$(uname -s)" = Darwin ] || die "this is the macOS launcher; on Linux run emu.sh directly"
+
+need_lima() {
+    command -v limactl >/dev/null 2>&1 && return 0
+    command -v brew >/dev/null 2>&1 || die "Lima isn't installed. Install Homebrew from https://brew.sh, then run: engineos-emu install"
+    say "installing Lima with Homebrew"
+    brew install lima || die "brew install lima failed"
+}
+
+# The VM: ENGINEOS_VM, else "engineos-emu", or the "sclive4-emu" VM an older install made.
+VM="${ENGINEOS_VM:-${SCLIVE4_VM:-}}"
+if [ -z "$VM" ]; then
+    VM=engineos-emu
+    if command -v limactl >/dev/null 2>&1 && [ -z "$(limactl list --format '{{.Name}}' engineos-emu 2>/dev/null)" ] &&
+       [ -n "$(limactl list --format '{{.Name}}' sclive4-emu 2>/dev/null)" ]; then VM=sclive4-emu; fi
+fi
+
+vm_status() { limactl list --format '{{.Status}}' "$VM" 2>/dev/null | head -n 1; }
+
+# While the VM is stopped: ~/SCLive4Emulator becomes ~/EngineOSEmulator, and the VM's shared
+# folder setting follows it. (emu.sh then repoints drives.txt.)
+migrate_share() {
+    [ -d "$OLD_SHARE" ] && [ ! -L "$OLD_SHARE" ] && [ ! -e "$HOME/EngineOSEmulator" ] || return 0
+    local cfg="${LIMA_HOME:-$HOME/.lima}/$VM/lima.yaml"
+    mv "$OLD_SHARE" "$HOME/EngineOSEmulator" || return 0
+    SHARE="$HOME/EngineOSEmulator"
+    [ -f "$cfg" ] && sed -i '' 's#"~/SCLive4Emulator"#"~/EngineOSEmulator"#' "$cfg"
+    say "moved ~/SCLive4Emulator to ~/EngineOSEmulator"
+}
+
+# In the VM, once nothing of the deck is mounted from it: /opt/sclive4-emulator moves to
+# /opt/engineos-emulator, leaving a link behind.
+migrate_opt() {
+    vm sudo sh -c 'o=/opt/sclive4-emulator d=/opt/engineos-emulator
+        [ -d "$o" ] && [ ! -L "$o" ] && [ ! -e "$d" ] || exit 0
+        grep -q " $o/" /proc/mounts && exit 0
+        mv "$o" "$d" && ln -s "$d" "$o" && echo "engineos-emu: moved /opt/sclive4-emulator to /opt/engineos-emulator in the VM"' || :
+}
+
+need_vm() {
+    need_lima
+    mkdir -p "$SHARE"
+    case "$(vm_status)" in
+        Running) ;;
+        Stopped) migrate_share; mkdir -p "$SHARE"
+                 say "starting the VM"; limactl start "$VM" >/dev/null || die "the VM didn't start (limactl start $VM)" ;;
+        "")
+            say "creating the VM (downloads Ubuntu 24.04, a few minutes the first time)"
+            limactl create --name="$VM" --tty=false "$YAML" || die "couldn't create the VM"
+            limactl start "$VM" || die "the VM didn't start (limactl start $VM)"
+            ;;
+        *) say "VM is $(vm_status); trying to start it"; limactl start "$VM" || die "the VM didn't start" ;;
+    esac
+    migrate_opt
+}
+
+PROFILE=
+if [ "${1:-}" = --profile ]; then PROFILE=${2:-}; shift 2; fi
+case "$PROFILE" in default) PROFILE= ;; *[!A-Za-z0-9_-]*) die "deck names are letters, digits, - and _" ;; esac
+
+vm() { limactl shell --workdir / "$VM" "$@"; }
+emu() { if [ -n "$PROFILE" ]; then vm sudo sh -c "$EMU_SH" emu --profile "$PROFILE" "$@"; else vm sudo sh -c "$EMU_SH" emu "$@"; fi; }
+
+# A path the VM can see: anything in the home folder as is, anything else copied into ~/EngineOSEmulator.
+vm_path() {
+    local p
+    p="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")" || die "no such file: $1"
+    [ -e "$p" ] || die "no such file: $1"
+    case "$p" in
+        "$HOME"/*) printf '%s\n' "$p" ;;
+        *) mkdir -p "$SHARE/files"; cp -R "$p" "$SHARE/files/" || die "couldn't copy $p"; printf '%s\n' "$SHARE/files/$(basename "$p")" ;;
+    esac
+}
+
+cmd="${1:-status}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+install)
+    need_vm
+    vm sudo sh -c '[ -x /opt/engineos-emulator/emu.sh ] || [ -x /opt/sclive4-emulator/emu.sh ]' || die "the emulator didn't get cloned into the VM; check your internet connection and run: engineos-emu update"
+    say "ready. Next: engineos-emu setup ~/Downloads/<SC LIVE 4 firmware file>"
+    ;;
+setup)
+    [ $# -ge 1 ] || die "usage: engineos-emu setup FIRMWARE [ENGINEX_BUNDLE]"
+    need_vm
+    fw="$(vm_path "$1")"; shift
+    if [ $# -ge 1 ]; then b="$(vm_path "$1")"; shift; emu setup "$fw" "$b" "$@"; else emu setup "$fw" "$@"; fi
+    ;;
+start)
+    need_vm
+    # In its own session, so the deck keeps running when this command's SSH session to the VM ends.
+    if [ -n "$PROFILE" ]; then set -- --profile "$PROFILE" start "$@"; else set -- start "$@"; fi
+    # The Mac app sets ENGINEOS_NO_OPEN: it opens the page itself (or not, per its setting).
+    vm sudo setsid -w sh -c "$EMU_SH" emu "$@" </dev/null && { say "deck: $DECK_URL"; [ -n "${ENGINEOS_NO_OPEN:-${SCLIVE4_NO_OPEN:-}}" ] || open "$DECK_URL"; }
+    ;;
+enginex|mod-install)
+    [ $# -ge 1 ] || die "usage: engineos-emu $cmd FILE.tar.gz"
+    need_vm
+    f="$(vm_path "$1")"; shift
+    if [ "$cmd" = enginex ]; then emu install "$f" "$@"; else emu mod-install "$f" "$@"; fi
+    ;;
+open) open "$DECK_URL" ;;
+console) open "$CONSOLE_URL" ;;
+drive)
+    need_vm
+    if [ "${1:-}" = add ] && [ $# -ge 2 ]; then
+        d="$(vm_path "$2")"
+        case "$d" in
+            "$SHARE"/*) ;;
+            *) say "note: $d is read-only in the VM, so Engine can't write its library there. Move the folder into $SHARE to use it fully." ;;
+        esac
+        shift 2; emu drive add "$d" "$@"
+    else
+        emu drive "$@"
+    fi
+    ;;
+update)
+    if [ -d "$HERE/../.git" ] && command -v git >/dev/null 2>&1; then
+        say "updating this folder"; git -C "$HERE/.." pull --ff-only || say "couldn't update $HERE/.. (local changes?)"
+    fi
+    need_vm
+    say "updating the emulator in the VM"
+    vm sudo sh -c "[ -d /opt/engineos-emulator/.git ] || git clone $REPO /opt/engineos-emulator; git -C /opt/engineos-emulator pull --ff-only"
+    ;;
+vm-stop)
+    need_lima
+    if [ "$(vm_status)" = Running ]; then emu stop >/dev/null 2>&1; limactl stop "$VM"; else say "the VM isn't running"; fi
+    ;;
+uninstall)
+    need_lima
+    [ -n "$(vm_status)" ] || { say "there's no VM to delete"; exit 0; }
+    if [ "${1:-}" != --yes ]; then
+        printf 'Delete the VM "%s" and the deck inside it? Your files in %s stay. [y/N] ' "$VM" "$SHARE"
+        read -r a; case "$a" in y|Y|yes) ;; *) say "left as it was"; exit 0 ;; esac
+    fi
+    limactl stop -f "$VM" >/dev/null 2>&1; limactl delete "$VM" && say "deleted"
+    ;;
+state)
+    command -v limactl >/dev/null 2>&1 || { echo "lima=missing"; command -v brew >/dev/null 2>&1 && echo brew=yes || echo brew=no; exit 0; }
+    echo "lima=yes"
+    st=$(vm_status); echo "vm=${st:-none}"
+    [ "$st" = Running ] || exit 0
+    emu info 2>/dev/null
+    # Every deck: name, set up, EngineX version, running.
+    vm sudo sh -c 'cd /opt/engineos-emulator 2>/dev/null || cd /opt/sclive4-emulator 2>/dev/null || exit 0
+        for d in rootfs rootfs-*; do
+            [ -d "$d" ] || continue
+            n=${d#rootfs}; n=${n#-}; [ -n "$n" ] || n=default
+            s=state${d#rootfs}; set=no; run=no
+            [ -x "$d/usr/Engine/Engine" ] && set=yes
+            [ -f "$s/emu.pid" ] && kill -0 "$(cat "$s/emu.pid")" 2>/dev/null && run=yes
+            printf "deck=%s\t%s\t%s\t%s\n" "$n" "$set" "$(head -n1 "$d/data/enginex/version.txt" 2>/dev/null)" "$run"
+        done' 2>/dev/null
+    exit 0
+    ;;
+help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+*)
+    need_vm
+    emu "$cmd" "$@"
+    ;;
+esac
