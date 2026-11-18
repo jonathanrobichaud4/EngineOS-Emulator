@@ -128,9 +128,11 @@ namespace EngineOSEmulator
     // The deck models the emulator knows, by inMusic product code. Only the SC LIVE 4 boots so far.
     static class DeckModels
     {
-        public static readonly string[] Codes = { "JP21", "JC11", "JC11S" };
-        public static readonly string[] Names = { "SC LIVE 4", "Prime 4", "Prime 4+" };
-        public static readonly bool[] Ready = { true, false, false };
+        // The SC LIVE 4 firmware runs as an SC LIVE 4 or a Prime 4+; the Prime 4 needs Prime 4 firmware.
+        public static readonly string[] Codes = { "JP21", "JC11S", "JC11" };
+        public static readonly string[] Names = { "SC LIVE 4", "Prime 4+", "Prime 4" };
+        public static readonly bool[] Ready = { true, true, true };
+        public const string FirmwareNote = "SC LIVE 4 and Prime 4+ decks are set up with the SC LIVE 4 firmware; a Prime 4 deck with Prime 4 firmware.";
         public static string Name(string code) { int i = Array.IndexOf(Codes, code); return i < 0 ? code : Names[i]; }
         public static string Label(int i) { return Ready[i] ? Names[i] : Names[i] + " (coming later)"; }
     }
@@ -353,6 +355,7 @@ namespace EngineOSEmulator
         Button setupButton;
         ComboBox profileBox;
         Label statusDot, drivesEmpty;
+        string lastEngineError = "";
 
         // The dot beside the status: green running, amber busy or starting, grey otherwise.
         void SetDot(string state)
@@ -890,11 +893,19 @@ namespace EngineOSEmulator
                 string sys = !setup ? "not set up: drop the firmware .img or updater here"
                            : Get("enginex", "").Length > 0 ? "EngineX " + Get("enginex", "") : "stock Engine OS";
                 string state = !running ? "stopped" : Get("engine", "down") == "up" ? "running" : "starting";
-                if (!busy)
+                string err = Get("engine_error", "");
+                if (!busy && err.Length > 0)
+                {
+                    statusLabel.Text = "Engine stopped: wrong firmware for this model";
+                    SetDot("error");
+                    if (err != lastEngineError) Log("Engine stopped: " + err);
+                }
+                else if (!busy)
                 {
                     statusLabel.Text = state + "  \u00B7  " + sys + (running && Get("ip", "").Length > 0 ? "  \u00B7  deck " + Get("ip", "") : "");
                     SetDot(state);
                 }
+                lastEngineError = err;
                 startButton.Enabled = !busy && setup && !running;
                 stopButton.Enabled = !busy && running;
                 rebootButton.Enabled = !busy && running;
@@ -958,7 +969,7 @@ namespace EngineOSEmulator
             {
                 f.SuspendLayout();
                 var root = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-                var note = new Label { Text = "Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time.",
+                var note = new Label { Text = "Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time. " + DeckModels.FirmwareNote,
                                        AutoSize = true, MaximumSize = new Size(S(600), 0), ForeColor = Dim, Margin = new Padding(0, 0, 0, S(8)) };
                 var list = new ListView { Size = new Size(S(600), S(220)), View = View.Details, FullRowSelect = true, MultiSelect = false,
                                           HideSelection = false, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,

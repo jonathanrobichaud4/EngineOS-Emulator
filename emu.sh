@@ -186,10 +186,13 @@ prepare_rootfs() {
     mkdir -p "$R/etc/emu" "$R/usr/bin"
     rm -rf "$R/sys" && tar -C "$R" -xzf "$HERE/files/fakesys.tar.gz"
     printf %s "$PRODUCT" > "$R/sys/firmware/devicetree/base/inmusic,product-code"  # no newline, as on the unit
-    # RK3288 Prime decks check the board before Engine starts its UI (it quits to "TestApp" when
-    # this fails): the secure eFuse holds the product code, the CPU-id eFuse "RK3288" + board +
-    # product at byte 7. Contents as QEngine writes them (rootfs_steps/write_fake_dt.sh, MIT,
-    # Copyright (c) Peyton-C). The SC LIVE 4's stand-ins (fakesys) already pass, so they stay.
+    # Engine runs only as a deck its firmware was built for: it checks the product code against
+    # its own list and otherwise quits to "TestApp" (engine_loop says so). The SC LIVE 4 firmware
+    # covers the SC LIVE 4 and the Prime 4+; the original Prime 4 needs Prime 4 firmware.
+    # RK3288 Prime decks also read their eFuses: the secure one holds the product code, the CPU-id
+    # one "RK3288" + board + product at byte 7. Contents as QEngine writes them
+    # (rootfs_steps/write_fake_dt.sh, MIT, Copyright (c) Peyton-C). The SC LIVE 4's stand-ins
+    # (fakesys) already pass, so they stay.
     if [ "$PRODUCT" != JP21 ]; then
         local ef=$R/sys/devices/platform
         mkdir -p "$ef/ffb10000.efuse/rockchip-efuse0" "$ef/ffb40000.efuse/rockchip-efuse0"
@@ -401,7 +404,11 @@ cmd_setup() {
             fw="$STATE/update.img" ;;
     esac
     say "extracting rootfs from ${fw##*/} (checking its digest)"
-    if ! python3 "$HERE/tools/qengine/extract_az0x_rootfs.py" "$fw" "$STATE/rootfs.img" >/dev/null 2>"$STATE/extract.log"; then
+    # "AZ01" images (Prime 4, Prime GO, SC6000) have the older container layout.
+    if [ "$(head -c 4 "$fw")" = AZ01 ]; then
+        python3 "$HERE/tools/qengine/extract_az01_rootfs.py" "$fw" "$STATE/rootfs.img" >/dev/null 2>"$STATE/extract.log" ||
+            die "couldn't read ${fw##*/}: $(tail -n1 "$STATE/extract.log")"
+    elif ! python3 "$HERE/tools/qengine/extract_az0x_rootfs.py" "$fw" "$STATE/rootfs.img" >/dev/null 2>"$STATE/extract.log"; then
         say "note: $(tail -n1 "$STATE/extract.log"); trying the plain reader"
         python3 "$HERE/tools/az0x_extract.py" "$fw" "$STATE/rootfs.img" rootfs
     fi
@@ -421,6 +428,7 @@ cmd_setup() {
 running() { [ -f "$STATE/emu.pid" ] && kill -0 "$(cat "$STATE/emu.pid")" 2>/dev/null; }
 
 engine_loop() {
+    rm -f "$STATE/engine-error"
     # Restarts Engine when it exits, like engine.service does (also how the console's restart works).
     local stock=$1 gl=$2 preload=/usr/lib/libemushim.so n=0 render t0 glfail=0
     local soft="QT_QPA_PLATFORM=offscreen:configfile=/etc/emu/screen.json QT_QUICK_BACKEND=software"
@@ -449,6 +457,16 @@ engine_loop() {
             /usr/Engine/Engine -d0 -skipFirmwareUpdate -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
         echo "=== Engine exited $(date '+%F %T')" >> "$STATE/engine.log"
+        # Quit straight to "TestApp": this firmware doesn't run as this model. Say so and stop
+        # restarting it.
+        if [ "$(cat "$R/tmp/engine-quit-reason" 2>/dev/null)" = TestApp ] && [ $(($(date +%s) - t0)) -lt 120 ]; then
+            local msg="this firmware doesn't run as a $(product_name "$PRODUCT"): the SC LIVE 4 firmware runs as an SC LIVE 4 or Prime 4+, Prime 4 firmware as a Prime 4. Change the deck's model or set it up with the right firmware."
+            echo "=== emu: $msg" >> "$STATE/engine.log"
+            echo "$msg" > "$STATE/engine-error"
+            rm -f "$R/tmp/engine-quit-reason"
+            return 0
+        fi
+        rm -f "$STATE/engine-error"
         # GL that starts but doesn't work (virgl drops Engine as soon as it connects, seen in a
         # Lima VM on a Mac), or a virgl server that has died: after two of those, finish this run in
         # software.
@@ -620,6 +638,7 @@ cmd_info() {
     echo "product=$PRODUCT"
     echo "product_name=$(product_name "$PRODUCT")"
     [ -x "$R/usr/Engine/Engine" ] && echo "setup=yes" || echo "setup=no"
+    echo "engine_error=$(cat "$STATE/engine-error" 2>/dev/null)"
     if [ -f "$R/data/enginex/version.txt" ]; then echo "enginex=$(head -n1 "$R/data/enginex/version.txt")"; else echo "enginex="; fi
     running && echo "running=yes" || echo "running=no"
     pgrep -f '/usr/Engine/Engine -d0' >/dev/null && echo "engine=up" || echo "engine=down"

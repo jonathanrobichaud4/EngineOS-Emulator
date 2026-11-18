@@ -75,9 +75,11 @@ struct DeckInfo: Hashable {
 /// The deck models the emulator knows, by inMusic product code. Only the SC LIVE 4 boots so far.
 struct DeckModel: Hashable {
     let code: String, name: String, ready: Bool
+    /// The SC LIVE 4 firmware runs as an SC LIVE 4 or a Prime 4+; the Prime 4 needs Prime 4 firmware.
     static let all = [DeckModel(code: "JP21", name: "SC LIVE 4", ready: true),
-                      DeckModel(code: "JC11", name: "Prime 4", ready: false),
-                      DeckModel(code: "JC11S", name: "Prime 4+", ready: false)]
+                      DeckModel(code: "JC11S", name: "Prime 4+", ready: true),
+                      DeckModel(code: "JC11", name: "Prime 4", ready: true)]
+    static let firmwareNote = "SC LIVE 4 and Prime 4+ decks are set up with the SC LIVE 4 firmware; a Prime 4 deck with Prime 4 firmware."
     static func name(_ code: String) -> String { all.first { $0.code == code }?.name ?? code }
 }
 
@@ -160,7 +162,8 @@ final class Model: ObservableObject {
         case "Running": break
         default: return (isSetUp ? "Stopped" : "VM stopped", .secondary)
         }
-        if !isSetUp { return ("No deck yet: drop an SC LIVE 4 firmware file here", .orange) }
+        if !isSetUp { return ("No deck yet: drop its firmware file here", .orange) }
+        if let e = state["engine_error"], !e.isEmpty { return ("Engine stopped: " + e, .red) }
         if running && engineUp { return ("Running", .green) }
         if running { return ("Starting Engine...", .yellow) }
         return ("Stopped", .secondary)
@@ -318,7 +321,7 @@ final class Model: ObservableObject {
     func newDeck() {
         let a = NSAlert()
         a.messageText = "New deck"
-        a.informativeText = "A name (letters, digits, - and _) and which deck it is. Then drop a firmware file on the window to set it up, with or without EngineX."
+        a.informativeText = "A name (letters, digits, - and _) and which deck it is. Then drop a firmware file on the window to set it up, with or without EngineX.\n\n" + DeckModel.firmwareNote
         let field = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
         field.stringValue = deckChoices.contains { $0.name == "stock" } ? "" : "stock"
         field.placeholderString = "name"
@@ -832,7 +835,7 @@ struct DecksView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Decks").font(.title3.bold())
-            Text("Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time.")
+            Text("Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time. " + DeckModel.firmwareNote)
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             List(selection: $picked) {
                 ForEach(m.deckChoices, id: \.name) { d in

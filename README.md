@@ -129,11 +129,21 @@ Managing decks:
 sudo ./emu.sh profile new stock            # an empty deck (then set it up as above)
 sudo ./emu.sh profile rename stock plain   # the deck has to be stopped
 sudo ./emu.sh profile delete plain         # deletes its rootfs and state; drive folders aren't touched
-sudo ./emu.sh profile model plain JP21     # which deck it is (JP21 SC LIVE 4; Prime 4 JC11 and Prime 4+ JC11S don't boot yet)
+sudo ./emu.sh profile model plain JC11S    # which deck it is: JP21 SC LIVE 4, JC11S Prime 4+, JC11 Prime 4
 ./emu.sh profiles                          # name, set up, EngineX version, model, running
 ```
 
 The Mac and Windows apps do the same from their **Decks** window (Cmd+K on a Mac).
+
+### Models
+
+| Model | Firmware to set it up with | Panel |
+| --- | --- | --- |
+| SC LIVE 4 (JP21) | SC LIVE 4 | `files/panel.json` |
+| Prime 4+ (JC11S) | SC LIVE 4 (its Engine also runs as a Prime 4+) | `files/panel-JC11S.json` |
+| Prime 4 (JC11) | Prime 4 | `files/panel-JC11.json` |
+
+Engine only runs as a deck its firmware was built for; the wrong pair stops with a message saying so. On the Prime 4 and 4+ Engine mixes the four decks itself; the page's output menu has Main, Booth, Phones (the headphone cue) and Zone, and the MASTER and PHONES knobs set how loud the browser plays them, as they're the unit's own analog controls. `tools/make_panel_p4.py` builds both panels from Denon's user guide drawing and Engine's mapping file.
 
 ### Drives
 
