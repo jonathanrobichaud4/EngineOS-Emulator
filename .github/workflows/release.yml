@@ -20,9 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build"
-      - run: ditto -c -k --keepParent "build/SC LIVE 4 Emulator.app" SCLive4Emulator-mac.zip
+      - run: ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
       - uses: actions/upload-artifact@v4
-        with: { name: mac, path: SCLive4Emulator-mac.zip }
+        with: { name: mac, path: EngineOSEmulator-mac.zip }
   windows:
     runs-on: ubuntu-latest
     steps:
@@ -30,7 +30,7 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel >/dev/null
       - run: BUILD_COMMIT=${{ github.sha }} windows/build.sh
       - uses: actions/upload-artifact@v4
-        with: { name: windows, path: windows/SCLive4Emulator.exe }
+        with: { name: windows, path: windows/EngineOSEmulator.exe }
   publish:
     needs: [mac, windows]
     runs-on: ubuntu-latest
@@ -42,12 +42,12 @@ jobs:
           TAG: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           cat > notes.md <<NOTES
-          SC LIVE 4 Emulator apps, built from ${GITHUB_SHA::7}.
+          EngineOS Emulator apps, built from ${GITHUB_SHA::7}.
 
-          - **Mac** (macOS 13 or later, Apple Silicon and Intel): SCLive4Emulator-mac.zip. Unzip, move the app to Applications, and the first time right-click it and choose Open (it isn't notarized). It runs the emulator in a Lima Linux VM; click Install in the app.
-          - **Windows** (10 and 11): SCLive4Emulator.exe. It runs the emulator in WSL. Windows may warn the first time because it isn't signed: More info, then Run anyway.
+          - **Mac** (macOS 13 or later, Apple Silicon and Intel): EngineOSEmulator-mac.zip. Unzip, move the app to Applications, and the first time right-click it and choose Open (it isn't notarized). It runs the emulator in a Lima Linux VM; click Install in the app.
+          - **Windows** (10 and 11): EngineOSEmulator.exe. It runs the emulator in WSL. Windows may warn the first time because it isn't signed: More info, then Run anyway.
 
           Both apps update themselves from the rolling mac-app and windows-app releases (an option in their settings), and update the emulator itself from the repository.
           NOTES
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "SC LIVE 4 Emulator $TAG" --notes-file notes.md \
-            mac/SCLive4Emulator-mac.zip windows/SCLive4Emulator.exe
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "EngineOS Emulator $TAG" --notes-file notes.md \
+            mac/EngineOSEmulator-mac.zip windows/EngineOSEmulator.exe

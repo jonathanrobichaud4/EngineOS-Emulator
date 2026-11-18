@@ -1,10 +1,10 @@
 # Builds the Windows app with Mono and publishes it as the "windows-app" release:
-# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/SCLive4Emulator.exe
+# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/EngineOSEmulator.exe
 name: Windows app
 on:
   push:
     branches: [main]
-    paths: ["windows/SCLive4Emulator.cs", "windows/app.ico", "windows/build.sh", ".github/workflows/windows-app.yml"]
+    paths: ["windows/EngineOSEmulator.cs", "windows/app.ico", "windows/build.sh", ".github/workflows/windows-app.yml"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -27,15 +27,19 @@ jobs:
           cat build.log
       - uses: actions/upload-artifact@v4
         with:
-          name: SCLive4Emulator-windows
-          path: windows/SCLive4Emulator.exe
+          name: EngineOSEmulator-windows
+          path: windows/EngineOSEmulator.exe
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view windows-app >/dev/null 2>&1 ||
-            gh release create windows-app --title "Windows app" --notes "The SC LIVE 4 Emulator app for Windows 10 and 11 (runs the emulator in WSL), built from main. Download SCLive4Emulator.exe and run it. Windows may warn the first time because it isn't signed: More info, then Run anyway."
-          gh release upload windows-app windows/SCLive4Emulator.exe --clobber
+          NOTES="The EngineOS Emulator app for Windows 10 and 11 (runs the emulator in WSL), built from main. Download EngineOSEmulator.exe and run it. Windows may warn the first time because it isn't signed: More info, then Run anyway."
+          gh release view windows-app >/dev/null 2>&1 || gh release create windows-app --title "Windows app" --notes "$NOTES"
+          gh release edit windows-app --notes "$NOTES"
+          gh release upload windows-app windows/EngineOSEmulator.exe --clobber
+          # Apps from before the rename (SC LIVE 4 Emulator) download the old name to update.
+          cp windows/EngineOSEmulator.exe SCLive4Emulator.exe
+          gh release upload windows-app SCLive4Emulator.exe --clobber
           # Last, so an app that sees the new version can already download it.
           echo "${{ github.sha }}" > version.txt
           gh release upload windows-app version.txt --clobber

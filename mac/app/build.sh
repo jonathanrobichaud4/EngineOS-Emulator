@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds "SC LIVE 4 Emulator.app" (Apple Silicon and Intel) from SCLive4Emulator.swift.
+# Builds "EngineOS Emulator.app" (Apple Silicon and Intel) from EngineOSEmulator.swift.
+# The name lives in AppInfo (EngineOSEmulator.swift), Info.plist and NAME/BIN here.
 # Needs Xcode or the Command Line Tools (xcode-select --install; Homebrew installs them too).
 #   mac/app/build.sh [OUTDIR]      default OUTDIR: mac/app/build
 # BUILD_COMMIT (the release build sets it to the git commit) is what the app compares with the
@@ -7,18 +8,19 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 OUT=${1:-build}
-APP="$OUT/SC LIVE 4 Emulator.app"
+NAME="EngineOS Emulator"; BIN=EngineOSEmulator
+APP="$OUT/$NAME.app"
 mkdir -p "$OUT"
 rm -rf "$APP" "$OUT/AppIcon.iconset"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 printf 'enum BuildInfo { static let commit = "%s" }\n' "${BUILD_COMMIT:-dev}" > "$OUT/BuildInfo.swift"
 for arch in arm64 x86_64; do
-    swiftc -O -parse-as-library -target "$arch-apple-macos13.0" -o "$OUT/SCLive4Emulator-$arch" \
-        SCLive4Emulator.swift "$OUT/BuildInfo.swift"
+    swiftc -O -parse-as-library -target "$arch-apple-macos13.0" -o "$OUT/$BIN-$arch" \
+        $BIN.swift "$OUT/BuildInfo.swift"
 done
-lipo -create -output "$APP/Contents/MacOS/SCLive4Emulator" "$OUT"/SCLive4Emulator-arm64 "$OUT"/SCLive4Emulator-x86_64
-rm -f "$OUT"/SCLive4Emulator-arm64 "$OUT"/SCLive4Emulator-x86_64
+lipo -create -output "$APP/Contents/MacOS/$BIN" "$OUT/$BIN-arm64" "$OUT/$BIN-x86_64"
+rm -f "$OUT/$BIN-arm64" "$OUT/$BIN-x86_64"
 
 cp Info.plist "$APP/Contents/Info.plist"
 [ "${BUILD_COMMIT:-dev}" = dev ] || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_COMMIT:0:7}" "$APP/Contents/Info.plist"

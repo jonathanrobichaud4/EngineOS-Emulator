@@ -1,4 +1,6 @@
-# SC LIVE 4 emulator (Engine OS + EngineX)
+# EngineOS Emulator (Engine OS + EngineX)
+
+Runs Denon DJ's Engine OS on your computer. It started as an SC LIVE 4 emulator, and the SC LIVE 4 is still the deck it supports today; the repository keeps its old name.
 
 Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with EngineX loaded the same way it is on the deck. Your browser shows the whole deck: the touchscreen in the middle, every button, knob, fader, jog wheel and pad around it, the LEDs Engine lights, and the audio coming out of it. Folders on your PC plug in as USB drives or an SD card, and the EngineX web console runs too, so you can install and test mods like on the real thing.
 
@@ -23,19 +25,21 @@ Not emulated yet:
 
 ## Windows app (no command line)
 
-`windows/SCLive4Emulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/SCLive4Emulator.exe) (the [Windows app release](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/tag/windows-app), rebuilt on every change) and run it; it needs nothing installed beyond Windows 10 or 11.
+`EngineOSEmulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/windows-app/EngineOSEmulator.exe) (the [Windows app release](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/tag/windows-app), rebuilt on every change) and run it; it needs nothing installed beyond Windows 10 or 11.
 
 - It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/sclive4-emulator` in Ubuntu), and finds an older copy and moves your deck over.
-- **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\SC LIVE 4 Emulator`, which is plugged in as the EMULATOR drive.
+- **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\EngineOS Emulator` (or `Music\SC LIVE 4 Emulator` if you used the app before it was renamed), which is plugged in as the EMULATOR drive.
 - Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
 
 Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler).
+
+Installed copies from before the rename to EngineOS Emulator update into the new app and keep their decks, settings and drives.
 
 ## macOS (Apple Silicon or Intel)
 
 The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows.
 
-**The app:** [download SC LIVE 4 Emulator for Mac](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/SCLive4Emulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
+**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/EngineOSEmulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
 
 **From Terminal**, `mac/sclive4-emu` does the same:
 
@@ -47,7 +51,7 @@ cd sclive4-emulator/mac
 ./sclive4-emu start                                    # opens http://localhost:8090
 ```
 
-- After that, double-click **Start SC LIVE 4 Emulator.command** in Finder to start it (the first time, right-click > Open).
+- After that, double-click **Start EngineOS Emulator.command** in Finder to start it (the first time, right-click > Open).
 - `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./sclive4-emu graphics software`, `./sclive4-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
 - Your home folder is visible in the VM read-only, so firmware and mod files can be anywhere in it. **Drives:** Engine writes its library onto a drive, so put folders you plug in as drives in `~/SCLive4Emulator` (writable from the VM): `./sclive4-emu drive add ~/SCLive4Emulator/Music`.
 - It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`mac/lima.yaml` sets these).

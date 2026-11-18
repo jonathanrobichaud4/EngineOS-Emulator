@@ -1,5 +1,5 @@
 # Builds the Mac app on a macOS runner and publishes it as the "mac-app" release:
-# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/SCLive4Emulator-mac.zip
+# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/EngineOSEmulator-mac.zip
 name: Mac app
 on:
   push:
@@ -30,24 +30,28 @@ jobs:
       - name: Screenshot
         continue-on-error: true
         run: |
-          open "build/SC LIVE 4 Emulator.app"
+          open "build/EngineOS Emulator.app"
           sleep 8
-          osascript -e 'tell application "System Events" to set frontmost of (first process whose name is "SCLive4Emulator") to true' || true
+          osascript -e 'tell application "System Events" to set frontmost of (first process whose name is "EngineOSEmulator") to true' || true
           sleep 2
           screencapture -x screenshot.png
-          pkill -x SCLive4Emulator || true
+          pkill -x EngineOSEmulator || true
       - name: Package
-        run: ditto -c -k --keepParent "build/SC LIVE 4 Emulator.app" SCLive4Emulator-mac.zip
+        run: ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: SCLive4Emulator-mac
-          path: SCLive4Emulator-mac.zip
+          name: EngineOSEmulator-mac
+          path: EngineOSEmulator-mac.zip
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view mac-app >/dev/null 2>&1 ||
-            gh release create mac-app --title "Mac app" --notes "The SC LIVE 4 Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Unzip, move it to Applications, then right-click > Open the first time."
+          NOTES="The EngineOS Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Download EngineOSEmulator-mac.zip, unzip, move it to Applications, then right-click > Open the first time."
+          gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --title "Mac app" --notes "$NOTES"
+          gh release edit mac-app --notes "$NOTES"
+          gh release upload mac-app EngineOSEmulator-mac.zip --clobber
+          # Apps from before the rename (SC LIVE 4 Emulator) download the old name to update.
+          cp EngineOSEmulator-mac.zip SCLive4Emulator-mac.zip
           gh release upload mac-app SCLive4Emulator-mac.zip --clobber
           # Last, so an app that sees the new version can already download it.
           echo "${{ github.sha }}" > version.txt

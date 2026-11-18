@@ -1,4 +1,4 @@
-// SC LIVE 4 Emulator for Windows: a window for the emulator that runs in WSL.
+// EngineOS Emulator for Windows: a window for the emulator that runs in WSL.
 //
 // Drop files on it instead of typing commands:
 //   firmware .img          sets up the selected deck (stock Engine OS); inMusic's updater
@@ -26,8 +26,22 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace SCLive4Emulator
+namespace EngineOSEmulator
 {
+    // The app's name, in one place. Settings and drive folders from before the rename keep
+    // being used if they exist, so an update keeps everything.
+    static class AppInfo
+    {
+        public const string Name = "EngineOS Emulator";
+        public const string OldName = "SC LIVE 4 Emulator";
+        public const string Exe = "EngineOSEmulator.exe";
+        public static string Folder(Environment.SpecialFolder root)
+        {
+            string b = Environment.GetFolderPath(root), old = Path.Combine(b, OldName);
+            return Directory.Exists(old) ? old : Path.Combine(b, Name);
+        }
+    }
+
     static class Program
     {
         [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
@@ -186,7 +200,7 @@ namespace SCLive4Emulator
 
     class Settings
     {
-        static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SC LIVE 4 Emulator"); } }
+        static string Dir { get { return AppInfo.Folder(Environment.SpecialFolder.ApplicationData); } }
         static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
         public static Dictionary<string, string> Load()
         {
@@ -202,7 +216,7 @@ namespace SCLive4Emulator
         {
             get
             {
-                string m = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "SC LIVE 4 Emulator");
+                string m = AppInfo.Folder(Environment.SpecialFolder.MyMusic);
                 Directory.CreateDirectory(m);
                 return m;
             }
@@ -243,7 +257,7 @@ namespace SCLive4Emulator
             SuspendLayout();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
-            Text = "SC LIVE 4 Emulator";
+            Text = AppInfo.Name;
             Font = new Font("Segoe UI", 9.5f);
             ClientSize = new Size(980, 720);
             MinimumSize = new Size(820, 600);
@@ -380,7 +394,7 @@ namespace SCLive4Emulator
 
             // header: title, deck picker, status
             var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
-            var title = new Label { Text = "SC LIVE 4 Emulator", AutoSize = true, Font = new Font("Segoe UI Semibold", 15f), Margin = new Padding(0, 2, 18, 0) };
+            var title = new Label { Text = AppInfo.Name, AutoSize = true, Font = new Font("Segoe UI Semibold", 15f), Margin = new Padding(0, 2, 18, 0) };
             var deckLabel = new Label { Text = "Deck:", AutoSize = true, ForeColor = Dim, Margin = new Padding(0, 9, 6, 0) };
             profileBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 210, Margin = new Padding(0, 5, 6, 0), BackColor = Panel1, ForeColor = Fg, FlatStyle = FlatStyle.Flat };
             profileBox.SelectedIndexChanged += async (s, e) => { settings["Profile"] = CurrentProfile; Settings.Save(settings); await RefreshAll(); };
@@ -841,7 +855,7 @@ namespace SCLive4Emulator
                 if (latest == BuildInfo.Commit) { if (manual) Log("The app is up to date (build " + latest.Substring(0, 7) + ")."); return; }
 
                 string exe = Application.ExecutablePath, dir = Path.GetDirectoryName(exe);
-                string fresh = Path.Combine(dir, "SCLive4Emulator.update.exe");
+                string fresh = Path.Combine(dir, "EngineOSEmulator.update.exe");
                 try { File.WriteAllText(fresh, ""); }
                 catch
                 {
@@ -849,11 +863,11 @@ namespace SCLive4Emulator
                     return;
                 }
                 Log("Downloading the new app (build " + latest.Substring(0, 7) + ")...");
-                using (var wc = new WebClient()) await wc.DownloadFileTaskAsync(AppRelease + "SCLive4Emulator.exe", fresh);
+                using (var wc = new WebClient()) await wc.DownloadFileTaskAsync(AppRelease + AppInfo.Exe, fresh);
                 if (new FileInfo(fresh).Length < 20000) { File.Delete(fresh); Log("The app download looked wrong; skipped."); return; }
 
                 string pid = Process.GetCurrentProcess().Id.ToString();
-                string bat = Path.Combine(Path.GetTempPath(), "sclive4-emulator-update.cmd");
+                string bat = Path.Combine(Path.GetTempPath(), "engineos-emulator-update.cmd");
                 File.WriteAllText(bat,
                     "@echo off\r\n" +
                     ":wait\r\n" +
@@ -1036,7 +1050,7 @@ namespace SCLive4Emulator
             SaveWindow();
             if (Get("running", "no") != "yes" || wsl.EmuDir.Length == 0) { StopKeepAlive(); return; }
             var r = MessageBox.Show(this, "The emulated deck is still running.\n\nStop it before closing?\n(No leaves it running in the background.)",
-                                    "SC LIVE 4 Emulator", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                                    AppInfo.Name, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (r == DialogResult.Cancel) { e.Cancel = true; return; }
             if (r == DialogResult.Yes)
             {

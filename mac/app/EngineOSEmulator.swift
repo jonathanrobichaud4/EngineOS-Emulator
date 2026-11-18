@@ -1,4 +1,4 @@
-// SC LIVE 4 Emulator for macOS: a window for the emulator, which runs in a Lima Linux VM.
+// EngineOS Emulator for macOS: a window for the emulator, which runs in a Lima Linux VM.
 // Everything goes through the bundled `sclive4-emu` launcher (Contents/Resources), the same
 // commands you'd type in Terminal. The app shows the deck's state, starts and stops it, takes
 // dropped files (firmware, EngineX bundle, mod, music folder), and shows what it's doing.
@@ -7,6 +7,13 @@
 
 import AppKit
 import SwiftUI
+
+/// The app's name, in one place. (Folder, VM and bundle-id names stay as they were so
+/// existing installs keep their decks and settings.)
+enum AppInfo {
+    static let name = "EngineOS Emulator"
+    static let zip = "EngineOSEmulator-mac.zip"
+}
 import UniformTypeIdentifiers
 
 // MARK: - Decks
@@ -345,7 +352,7 @@ final class Model: ObservableObject {
 
     private func installAppUpdate(_ latest: String) {
         append("\n> Downloading the new app (build \(latest.prefix(7)))\n")
-        URLSession.shared.downloadTask(with: URL(string: Model.release + "SCLive4Emulator-mac.zip")!) { tmp, resp, err in
+        URLSession.shared.downloadTask(with: URL(string: Model.release + AppInfo.zip)!) { tmp, resp, err in
             let fail = { (why: String) in DispatchQueue.main.async { self.append("App update failed: \(why)\n") } }
             guard let tmp = tmp, (resp as? HTTPURLResponse)?.statusCode == 200 else { fail(err?.localizedDescription ?? "download failed"); return }
             let fm = FileManager.default
@@ -365,15 +372,17 @@ final class Model: ObservableObject {
                 guard fm.isWritableFile(atPath: old.deletingLastPathComponent().path) else {
                     fail("can't write to \(old.deletingLastPathComponent().path); download it from the release page instead"); return
                 }
-                // Swap the bundles after this app quits, then open the new one.
+                // Swap the bundles after this app quits, then open the new one. It goes in under
+                // its own name, so an install from before the rename picks up the new name.
+                let dest = old.deletingLastPathComponent().appendingPathComponent(newApp.lastPathComponent)
                 let script = work.appendingPathComponent("swap.sh")
                 let sh = """
                 #!/bin/bash
                 while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
-                rm -rf "\(old.path).old" && mv "\(old.path)" "\(old.path).old" && mv "\(newApp.path)" "\(old.path)" &&
-                  xattr -dr com.apple.quarantine "\(old.path)" 2>/dev/null
+                rm -rf "\(old.path).old" && mv "\(old.path)" "\(old.path).old" && mv "\(newApp.path)" "\(dest.path)" &&
+                  xattr -dr com.apple.quarantine "\(dest.path)" 2>/dev/null
                 rm -rf "\(old.path).old"
-                open "\(old.path)"
+                open "\(dest.path)"
                 """
                 try sh.write(to: script, atomically: true, encoding: .utf8)
                 let p = Process()
@@ -507,10 +516,10 @@ struct ContentView: View {
         HStack(spacing: 10) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(m.state["product_name"].map { "\($0) Emulator" } ?? "SC LIVE 4 Emulator").font(.title2.bold())
+                Text(AppInfo.name).font(.title2.bold())
                 HStack(spacing: 6) {
                     Circle().fill(m.summary.color).frame(width: 9, height: 9)
-                    Text(m.busy ? m.task : m.summary.text).foregroundStyle(.secondary).lineLimit(1)
+                    Text((m.state["product_name"].map { "\($0): " } ?? "") + (m.busy ? m.task : m.summary.text)).foregroundStyle(.secondary).lineLimit(1)
                     if m.busy { ProgressView().controlSize(.small) }
                 }
             }
@@ -646,12 +655,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct SCLive4EmulatorApp: App {
+struct EngineOSEmulatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = Model()
 
     var body: some Scene {
-        WindowGroup("SC LIVE 4 Emulator") {
+        WindowGroup(AppInfo.name) {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 720, minHeight: 480)

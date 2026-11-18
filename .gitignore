@@ -8,3 +8,4 @@ __pycache__/
 *.pyc
 emu.conf
 mac/app/build/
+windows/*.exe

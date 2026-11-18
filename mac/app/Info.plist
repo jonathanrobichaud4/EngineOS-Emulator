@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key><string>SC LIVE 4 Emulator</string>
-	<key>CFBundleDisplayName</key><string>SC LIVE 4 Emulator</string>
+	<key>CFBundleName</key><string>EngineOS Emulator</string>
+	<key>CFBundleDisplayName</key><string>EngineOS Emulator</string>
 	<key>CFBundleIdentifier</key><string>io.github.jonathanrobichaud4.sclive4-emulator</string>
-	<key>CFBundleExecutable</key><string>SCLive4Emulator</string>
+	<key>CFBundleExecutable</key><string>EngineOSEmulator</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>1.0</string>
