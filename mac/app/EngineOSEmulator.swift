@@ -127,6 +127,7 @@ final class Model: ObservableObject {
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { [weak self] _ in self?.refresh() }
         if autoUpdateApp { checkAppUpdate(manual: false) }
+        else { append("Automatic app updates are off (Settings > Update this app automatically).\n") }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self, self.vm == "Running" || self.vm == "Stopped" else { return }
             if self.autoUpdate {
@@ -470,13 +471,13 @@ final class Model: ObservableObject {
             let latest = data.map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
             DispatchQueue.main.async {
                 guard code == 200, latest.count >= 7 else {
-                    if manual { self.append("Couldn't check for app updates\(err.map { ": \($0.localizedDescription)" } ?? " (HTTP \(code))").\n") }
+                    self.append("Couldn't check for app updates\(err.map { ": \($0.localizedDescription)" } ?? " (HTTP \(code))").\n")
                     return
                 }
                 let d = UserDefaults.standard
                 if latest == BuildInfo.commit {
                     d.removeObject(forKey: "updateAttempt")
-                    if manual { self.append("The app is up to date (build \(latest.prefix(7))).\n") }
+                    self.append("The app is up to date (build \(latest.prefix(7))).\n")
                     return
                 }
                 // Already tried this build and it's still not running: the swap failed. Don't
