@@ -50,3 +50,4 @@ jobs:
             gh release create mac-app --title "Mac app" --notes "The SC LIVE 4 Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Unzip, move it to Applications, then right-click > Open the first time."
           gh release upload mac-app SCLive4Emulator-mac.zip --clobber
           [ -f screenshot.png ] && gh release upload mac-app screenshot.png --clobber || true
+          gh release delete-asset mac-app screenshot-full.png -y 2>/dev/null || true
