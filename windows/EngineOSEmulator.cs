@@ -205,6 +205,19 @@ namespace EngineOSEmulator
             throw new InvalidOperationException("Only files on a drive letter can be used (not " + win + ")");
         }
 
+        // Moves the git checkout in the current folder to the release vWANT, or the newest release,
+        // or main while there are no releases. $want and $force (--force for the app's own copy,
+        // which may drop local edits) are set first. Prints "up to date (X)" or "updated X -> Y".
+        public const string UpdateToRelease =
+            "before=$(git describe --tags --always)\n" +
+            "git fetch -q --tags --force origin || { echo 'update check failed (no internet?)'; exit 1; }\n" +
+            "tag=; [ -n \"$want\" ] && git rev-parse -q --verify \"refs/tags/v$want\" >/dev/null && tag=v$want\n" +
+            "[ -n \"$tag\" ] || tag=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)\n" +
+            "if [ -n \"$tag\" ]; then git checkout -q $force --detach \"$tag\" || { echo \"could not switch to $tag (local changes?)\"; exit 1; }\n" +
+            "else git checkout -q $force main && git merge -q --ff-only origin/main || { echo 'could not update (local changes?)'; exit 1; }; fi\n" +
+            "after=$(git describe --tags --always)\n" +
+            "if [ \"$before\" = \"$after\" ]; then echo \"up to date ($after)\"; else echo \"updated $before -> $after\"; fi\n";
+
         public static string Q(string s) { return "'" + s.Replace("'", "'\\''") + "'"; }
 
         // wsl.exe takes the name as-is and does not strip quotes, so -d "Ubuntu" looks for a distro
@@ -585,7 +598,9 @@ namespace EngineOSEmulator
         async Task Init()
         {
             ActionsEnabled(false);
+            NoteInstalledVersion();
             if (Option("AutoUpdateApp", true)) _ = CheckAppUpdate(false);
+            else Log("Automatic app updates are off (More... > Update this app automatically).");
             if (!Wsl.Installed)
             {
                 ShowSetup("WSL isn't installed. The emulator runs in WSL (Windows Subsystem for Linux), so that comes first. " +
@@ -832,23 +847,34 @@ namespace EngineOSEmulator
         async Task ManageDecks()
         {
             if (wsl.EmuDir.Length == 0) return;
-            using (var f = new Form { AutoScaleDimensions = new SizeF(96F, 96F), AutoScaleMode = AutoScaleMode.Dpi, Text = "Decks", FormBorderStyle = FormBorderStyle.FixedDialog,
-                                      StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(640, 380),
+            // Laid out with auto-sizing panels, and the few pixel sizes scaled by hand (S), so it
+            // fits at any display scaling.
+            using (var f = new Form { AutoScaleMode = AutoScaleMode.None, Text = "Decks", FormBorderStyle = FormBorderStyle.FixedDialog,
+                                      StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false,
+                                      AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(S(12)),
                                       BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
             {
+                f.SuspendLayout();
+                var root = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
                 var note = new Label { Text = "Each deck is its own emulated unit with its own firmware, settings, library and mods. One runs at a time.",
-                                       Left = 12, Top = 10, Width = 616, Height = 36, ForeColor = Dim };
-                var list = new ListView { Left = 12, Top = 48, Width = 616, Height = 230, View = View.Details, FullRowSelect = true, MultiSelect = false,
-                                          HideSelection = false, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle, HeaderStyle = ColumnHeaderStyle.Nonclickable };
-                list.Columns.Add("Deck", 160); list.Columns.Add("Model", 130); list.Columns.Add("Status", 300);
-                var modelLabel = new Label { Text = "Model:", Left = 12, Top = 292, AutoSize = true };
-                var model = new ComboBox { Left = 66, Top = 288, Width = 220, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Panel1, ForeColor = Fg, FlatStyle = FlatStyle.Flat };
+                                       AutoSize = true, MaximumSize = new Size(S(600), 0), ForeColor = Dim, Margin = new Padding(0, 0, 0, S(8)) };
+                var list = new ListView { Size = new Size(S(600), S(220)), View = View.Details, FullRowSelect = true, MultiSelect = false,
+                                          HideSelection = false, BackColor = Panel1, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
+                                          HeaderStyle = ColumnHeaderStyle.Nonclickable, Margin = new Padding(0, 0, 0, S(10)) };
+                list.Columns.Add("Deck", S(160)); list.Columns.Add("Model", S(130)); list.Columns.Add("Status", S(290));
+                var modelRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0, 0, 0, S(12)) };
+                var modelLabel = new Label { Text = "Model:", AutoSize = true, Margin = new Padding(0, S(5), S(8), 0) };
+                var model = new ComboBox { Width = S(240), DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Panel1, ForeColor = Fg, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
+                modelRow.Controls.AddRange(new Control[] { modelLabel, model });
                 for (int i = 0; i < DeckModels.Codes.Length; i++) model.Items.Add(DeckModels.Label(i));
                 var add = MakeButton("Add...", null); var ren = MakeButton("Rename...", null); var del = MakeButton("Delete...", null);
                 var use = MakeButton("Use this deck", null, true); var close = MakeButton("Close", null);
-                var row = new FlowLayoutPanel { Left = 12, Top = 330, Width = 616, Height = 40, WrapContents = false };
+                foreach (var b in new[] { add, ren, del, use, close }) b.MinimumSize = new Size(S(80), S(32));
+                var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0) };
                 row.Controls.AddRange(new Control[] { add, ren, del, use, close });
-                f.Controls.AddRange(new Control[] { note, list, modelLabel, model, row });
+                root.Controls.AddRange(new Control[] { note, list, modelRow, row });
+                f.Controls.Add(root);
+                f.ResumeLayout(true);
                 close.DialogResult = DialogResult.Cancel; f.CancelButton = close;
 
                 bool loading = false;
@@ -984,17 +1010,49 @@ namespace EngineOSEmulator
             m.Show(anchor, new Point(0, anchor.Height));
         }
 
-        // The app itself is published as the "windows-app" release, with version.txt holding the
-        // commit it was built from (BuildInfo.Commit, set by windows/build.sh). A different commit
-        // there means a newer build: download it next to this one, and once this app has quit, a
-        // small batch file moves it into place and starts it. Local builds ("dev") never update.
-        const string AppRelease = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/";
+        // Each release (vX.Y.Z) carries version.txt with its version. A newer one than this app's
+        // (BuildInfo.Version, set by windows/build.sh) means an update: download that release's exe
+        // next to this one, and once this app has quit, a small batch file moves it into place and
+        // starts it. Test builds ("dev") never update.
+        const string AppRelease = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/";
+
+        // Installed with the setup program: keep the version in Windows' installed-apps list right
+        // after the app has updated itself.
+        static void NoteInstalledVersion()
+        {
+            if (BuildInfo.Version == "dev") return;
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\EngineOSEmulator", true))
+                {
+                    if (k == null) return;
+                    string dir = (k.GetValue("InstallLocation") as string ?? "").TrimEnd('\\');
+                    if (string.Equals(dir, Path.GetDirectoryName(Application.ExecutablePath), StringComparison.OrdinalIgnoreCase))
+                        k.SetValue("DisplayVersion", BuildInfo.Version);
+                }
+            }
+            catch { }
+        }
+
+        // True if version a (like 1.2.10) is newer than b.
+        static bool Newer(string a, string b)
+        {
+            var x = a.Split('.'); var y = b.Split('.');
+            for (int i = 0; i < Math.Max(x.Length, y.Length); i++)
+            {
+                int p = 0, q = 0;
+                if (i < x.Length) int.TryParse(x[i], out p);
+                if (i < y.Length) int.TryParse(y[i], out q);
+                if (p != q) return p > q;
+            }
+            return false;
+        }
 
         async Task CheckAppUpdate(bool manual)
         {
-            if (BuildInfo.Commit == "dev")
+            if (BuildInfo.Version == "dev")
             {
-                if (manual) Log("This is a local build (not from the release), so it doesn't update itself.");
+                if (manual) Log("This is a test build (not from a release), so it doesn't update itself.");
                 return;
             }
             try
@@ -1006,8 +1064,20 @@ namespace EngineOSEmulator
                     wc.Headers[HttpRequestHeader.CacheControl] = "no-cache";
                     latest = (await wc.DownloadStringTaskAsync(AppRelease + "version.txt")).Trim();
                 }
-                if (latest.Length < 7) { if (manual) Log("Couldn't read the latest app version."); return; }
-                if (latest == BuildInfo.Commit) { if (manual) Log("The app is up to date (build " + latest.Substring(0, 7) + ")."); return; }
+                if (latest.Length == 0 || !char.IsDigit(latest[0])) { Log("Couldn't read the latest app version."); return; }
+                if (!Newer(latest, BuildInfo.Version))
+                {
+                    settings.Remove("UpdateAttempt"); Settings.Save(settings);
+                    Log("The app is up to date (v" + BuildInfo.Version + ").");
+                    return;
+                }
+                // Already tried this version and it's still not running: don't loop.
+                string tried;
+                if (!manual && settings.TryGetValue("UpdateAttempt", out tried) && tried == latest)
+                {
+                    Log("The update to v" + latest + " didn't install last time. Use Check for app updates to try again, or download it from the release page.");
+                    return;
+                }
 
                 string exe = Application.ExecutablePath, dir = Path.GetDirectoryName(exe);
                 string fresh = Path.Combine(dir, "EngineOSEmulator.update.exe");
@@ -1017,7 +1087,7 @@ namespace EngineOSEmulator
                     Log("A new app version is out, but this folder isn't writable (" + dir + "). Download it from the Windows app release on GitHub.");
                     return;
                 }
-                Log("Downloading the new app (build " + latest.Substring(0, 7) + ")...");
+                Log("Downloading " + AppInfo.Name + " v" + latest + "...");
                 using (var wc = new WebClient()) await wc.DownloadFileTaskAsync(AppRelease + AppInfo.Exe, fresh);
                 if (new FileInfo(fresh).Length < 20000) { File.Delete(fresh); Log("The app download looked wrong; skipped."); return; }
 
@@ -1031,19 +1101,21 @@ namespace EngineOSEmulator
                     "start \"\" \"" + exe + "\"\r\n" +
                     "del \"%~f0\"\r\n");
                 Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + bat + "\"") { CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, UseShellExecute = false });
+                settings["UpdateAttempt"] = latest; Settings.Save(settings);
                 Log("Restarting with the new app...");
                 await Task.Delay(800);
                 Application.Exit();
             }
             catch (Exception ex)
             {
-                if (manual) Log("Couldn't check for app updates: " + ex.Message);
+                Log("Couldn't check for app updates: " + ex.Message);
             }
         }
 
-        // Brings the emulator in WSL up to date with GitHub. The copy this app installed in /opt is the
-        // app's own, so local edits there are overwritten; your decks, settings and drives live in
-        // ignored folders (rootfs*, state*, drives.txt) and are never touched.
+        // Moves the emulator in WSL to the release matching this app (or the newest release, or main
+        // before there are any). The copy this app installed in /opt is the app's own, so local edits
+        // there are overwritten; your decks, settings and drives live in ignored folders (rootfs*,
+        // state*, drives.txt) and are never touched.
         async Task UpdateEmulator(bool quiet)
         {
             string dir = Wsl.Q(wsl.EmuDir);
@@ -1053,16 +1125,9 @@ namespace EngineOSEmulator
                 "git config --global --add safe.directory " + dir + " 2>/dev/null\n" +
                 // Clones from before the repository was renamed get its new address.
                 "case $(git remote get-url origin) in *jonathanrobichaud4/sclive4-emulator*) git remote set-url origin " + Wsl.RepoUrl + " ;; esac\n" +
-                "before=$(git rev-parse --short HEAD)\n" +
-                "git fetch -q origin || { echo 'update check failed (no internet in WSL?)'; exit 1; }\n" +
-                "br=$(git rev-parse --abbrev-ref HEAD)\n" +
-                "if ! git merge -q --ff-only origin/$br 2>/dev/null; then\n" +
-                (wsl.EmuDir == AppInfo.EmuDir || wsl.EmuDir == AppInfo.OldEmuDir
-                    ? "  echo 'local changes were in the way; resetting to the GitHub version'; git reset -q --hard origin/$br\n"
-                    : "  echo 'could not fast-forward (local changes?); run git pull in '" + dir + "' yourself'; exit 1\n") +
-                "fi\n" +
-                "after=$(git rev-parse --short HEAD)\n" +
-                "if [ \"$before\" = \"$after\" ]; then echo \"up to date ($after)\"; else echo \"updated $before -> $after\"; git log --oneline $before..$after | head -n 8; fi\n";
+                "want=" + (BuildInfo.Version == "dev" ? "" : BuildInfo.Version) + "\n" +
+                "force=" + (wsl.EmuDir == AppInfo.EmuDir || wsl.EmuDir == AppInfo.OldEmuDir ? "--force" : "") + "\n" +
+                Wsl.UpdateToRelease;
             var lines = new List<string>();
             int rc = await wsl.Run(script, l => lines.Add(l));
             bool news = lines.Any(l => !l.StartsWith("up to date"));
@@ -1235,16 +1300,25 @@ namespace EngineOSEmulator
         // ---------------------------------------------------------------- small dialog
         static string Prompt(string title, string text, string value)
         {
-            using (var f = new Form { AutoScaleDimensions = new SizeF(96F, 96F), AutoScaleMode = AutoScaleMode.Dpi, Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(420, 130), BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
+            using (var f = new Form { AutoScaleMode = AutoScaleMode.None, Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+                                      MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                                      BackColor = Bg, ForeColor = Fg, Font = new Font("Segoe UI", 9.5f) })
             {
+                float k; using (var g = f.CreateGraphics()) k = g.DpiX / 96f;
+                Func<int, int> S = px => (int)Math.Round(px * k);
                 f.SuspendLayout();
-                var l = new Label { Text = text, Left = 12, Top = 12, Width = 396, Height = 36 };
-                var t = new TextBox { Text = value, Left = 12, Top = 52, Width = 396, BackColor = Panel1, ForeColor = Fg };
-                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 238, Top = 88, Width = 80, Height = 30, FlatStyle = FlatStyle.Flat };
-                var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 328, Top = 88, Width = 80, Height = 30, FlatStyle = FlatStyle.Flat };
-                f.Controls.AddRange(new Control[] { l, t, ok, cancel });
+                f.Padding = new Padding(S(12));
+                var root = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+                var l = new Label { Text = text, AutoSize = true, MaximumSize = new Size(S(420), 0), Margin = new Padding(0, 0, 0, S(8)) };
+                var t = new TextBox { Text = value, Width = S(420), BackColor = Panel1, ForeColor = Fg, Margin = new Padding(0, 0, 0, S(12)) };
+                var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
+                var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true, MinimumSize = new Size(S(80), S(30)), FlatStyle = FlatStyle.Flat };
+                var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true, MinimumSize = new Size(S(80), S(30)), FlatStyle = FlatStyle.Flat, Margin = new Padding(S(8), 0, 0, 0) };
+                row.Controls.AddRange(new Control[] { ok, cancel });
+                root.Controls.AddRange(new Control[] { l, t, row });
+                f.Controls.Add(root);
                 f.AcceptButton = ok; f.CancelButton = cancel;
-                f.ResumeLayout(false);
+                f.ResumeLayout(true);
                 return f.ShowDialog() == DialogResult.OK ? t.Text.Trim() : null;
             }
         }

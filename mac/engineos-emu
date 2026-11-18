@@ -183,12 +183,23 @@ update)
     fi
     need_vm
     say "updating the emulator in the VM"
-    # Clones from before the repository was renamed get its new address.
     # The copy in use (the old place on a VM that hasn't moved yet); a fresh clone only if neither.
+    # Clones from before the repository was renamed get its new address. Then it moves to the
+    # release matching the app (ENGINEOS_VERSION, set by the Mac app), or the newest release, or
+    # main while there are no releases. It's the app's own copy, so local edits there go.
     vm sudo sh -c "d=/opt/engineos-emulator; [ -d \$d/.git ] || { [ -d /opt/sclive4-emulator/.git ] && d=/opt/sclive4-emulator; }
-        [ -d \$d/.git ] || git clone $REPO \$d
-        case \$(git -C \$d remote get-url origin) in *jonathanrobichaud4/sclive4-emulator*) git -C \$d remote set-url origin $REPO ;; esac
-        git -C \$d pull --ff-only"
+        [ -d \$d/.git ] || git clone -q $REPO \$d
+        cd \$d || exit 1
+        case \$(git remote get-url origin) in *jonathanrobichaud4/sclive4-emulator*) git remote set-url origin $REPO ;; esac
+        want='${ENGINEOS_VERSION:-}' force=--force
+        before=\$(git describe --tags --always)
+        git fetch -q --tags --force origin || { echo 'update check failed (no internet?)'; exit 1; }
+        tag=; [ -n \"\$want\" ] && git rev-parse -q --verify \"refs/tags/v\$want\" >/dev/null && tag=v\$want
+        [ -n \"\$tag\" ] || tag=\$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)
+        if [ -n \"\$tag\" ]; then git checkout -q \$force --detach \"\$tag\" || exit 1
+        else git checkout -q \$force main && git merge -q --ff-only origin/main || exit 1; fi
+        after=\$(git describe --tags --always)
+        if [ \"\$before\" = \"\$after\" ]; then echo \"up to date (\$after)\"; else echo \"updated \$before -> \$after\"; fi"
     ;;
 vm-stop)
     need_lima

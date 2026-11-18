@@ -14,7 +14,10 @@ mkdir -p "$OUT"
 rm -rf "$APP" "$OUT/AppIcon.iconset"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-printf 'enum BuildInfo { static let commit = "%s" }\n' "${BUILD_COMMIT:-dev}" > "$OUT/BuildInfo.swift"
+# BUILD_VERSION (a release build sets it from VERSION) is what the app compares with the newest
+# release to update itself; any other build is "dev" and never replaces itself.
+printf 'enum BuildInfo { static let version = "%s"; static let commit = "%s" }\n' \
+    "${BUILD_VERSION:-dev}" "${BUILD_COMMIT:-dev}" > "$OUT/BuildInfo.swift"
 for arch in arm64 x86_64; do
     swiftc -O -parse-as-library -target "$arch-apple-macos13.0" -o "$OUT/$BIN-$arch" \
         $BIN.swift "$OUT/BuildInfo.swift"
@@ -24,6 +27,7 @@ rm -f "$OUT/$BIN-arm64" "$OUT/$BIN-x86_64"
 
 cp Info.plist "$APP/Contents/Info.plist"
 [ "${BUILD_COMMIT:-dev}" = dev ] || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_COMMIT:0:7}" "$APP/Contents/Info.plist"
+[ "${BUILD_VERSION:-dev}" = dev ] || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BUILD_VERSION" "$APP/Contents/Info.plist"
 # The launcher and the VM definition travel inside the app.
 cp ../engineos-emu ../lima.yaml "$APP/Contents/Resources/"
 chmod 755 "$APP/Contents/Resources/engineos-emu"

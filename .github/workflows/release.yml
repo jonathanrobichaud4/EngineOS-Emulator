@@ -1,53 +1,120 @@
-# A numbered release with both apps: run this workflow from GitHub's Actions tab (Run workflow,
-# then a version like v1.0.0), or push a tag like v1.0.0. It builds the Mac and Windows apps from
-# that commit and publishes them as the release for that version, creating the tag. (The rolling mac-app and
-# windows-app releases, which the apps update themselves from, are built by their own workflows.)
+# Releases. The version lives in the VERSION file: changing it on main (or running this workflow
+# from the Actions tab) builds both apps and the installers from that commit and publishes them
+# together as release vX.Y.Z, creating the tag. The apps update themselves from the newest
+# release, and move the emulator in the VM / WSL to the release that matches them.
 name: Release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release, like v1.0.0"
-        required: true
-        default: "v1.0.0"
 permissions:
   contents: write
+concurrency: release
 jobs:
-  mac:
-    runs-on: macos-latest
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build"
-      - run: ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
-      - uses: actions/upload-artifact@v4
-        with: { name: mac, path: EngineOSEmulator-mac.zip }
-  windows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel >/dev/null
-      - run: BUILD_COMMIT=${{ github.sha }} windows/build.sh
-      - uses: actions/upload-artifact@v4
-        with: { name: windows, path: windows/EngineOSEmulator.exe }
-  publish:
-    needs: [mac, windows]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.inputs.version || github.ref_name }}
+      - id: v
         run: |
-          cat > notes.md <<NOTES
-          EngineOS Emulator apps, built from ${GITHUB_SHA::7}.
-
-          - **Mac** (macOS 13 or later, Apple Silicon and Intel): EngineOSEmulator-mac.zip. Unzip, move the app to Applications, and the first time right-click it and choose Open (it isn't notarized). It runs the emulator in a Lima Linux VM; click Install in the app.
-          - **Windows** (10 and 11): EngineOSEmulator.exe. It runs the emulator in WSL. Windows may warn the first time because it isn't signed: More info, then Run anyway.
-
-          Both apps update themselves from the rolling mac-app and windows-app releases (an option in their settings), and update the emulator itself from the repository.
-          NOTES
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "EngineOS Emulator $TAG" --notes-file notes.md \
-            mac/EngineOSEmulator-mac.zip windows/EngineOSEmulator.exe
+          v=$(tr -d ' \r\n' < VERSION)
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::VERSION should look like 1.2.3, not '$v'"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "::error::v$v is already released; bump VERSION"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+  mac:
+    needs: version
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build"
+      - name: Zip (what the app updates itself from)
+        run: |
+          ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
+          unzip -p EngineOSEmulator-mac.zip "EngineOS Emulator.app/Contents/Info.plist" | grep -q "<string>$VERSION</string>" ||
+            { echo "::error::the packaged app isn't version $VERSION"; exit 1; }
+      - name: Disk image (what people download)
+        run: |
+          mkdir dmg
+          ditto "build/EngineOS Emulator.app" "dmg/EngineOS Emulator.app"
+          ln -s /Applications dmg/Applications
+          # hdiutil on CI runners sometimes reports "Resource busy"; try a few times.
+          for i in 1 2 3 4 5; do
+            hdiutil create -volname "EngineOS Emulator $VERSION" -srcfolder dmg -ov -format UDZO EngineOSEmulator-mac.dmg && break
+            sleep 5
+          done
+          [ -f EngineOSEmulator-mac.dmg ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            EngineOSEmulator-mac.zip
+            EngineOSEmulator-mac.dmg
+  windows:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel nsis >/dev/null
+      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} windows/build.sh
+      - run: makensis -V2 -DVERSION="$VERSION" windows/installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            windows/EngineOSEmulator.exe
+            windows/EngineOSEmulator-Setup.exe
+  publish:
+    needs: [version, mac, windows]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - name: Publish v${{ needs.version.outputs.version }}
+        run: |
+          prev=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)
+          {
+            echo "## Download"
+            echo
+            echo "- **Mac** (macOS 13 or later, Apple Silicon and Intel): **EngineOSEmulator-mac.dmg**. Open it and drag EngineOS Emulator into Applications. The app isn't notarized, so the first time: right-click it and choose Open (on macOS 15, open it once, then System Settings > Privacy & Security > Open Anyway). It runs the emulator in a Lima Linux VM; click Install in the app."
+            echo "- **Windows** (10 and 11): **EngineOSEmulator-Setup.exe** installs it for your user (no admin needed), with a Start menu entry and an uninstaller. Or run **EngineOSEmulator.exe** as is. It isn't signed, so Windows may warn the first time: More info, then Run anyway. It runs the emulator in WSL; click Install in the app."
+            echo
+            echo "Both apps update themselves to newer releases (an option in their settings), and keep the emulator they run on the same release."
+            echo
+            if [ -n "$prev" ]; then
+              echo "## Changes since $prev"
+              echo
+              git log --no-merges --format='- %s' "$prev..HEAD"
+            fi
+          } > notes.md
+          echo "$VERSION" > version.txt
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+            --title "EngineOS Emulator $VERSION" --notes-file notes.md \
+            dist/mac/EngineOSEmulator-mac.dmg dist/mac/EngineOSEmulator-mac.zip \
+            dist/windows/EngineOSEmulator-Setup.exe dist/windows/EngineOSEmulator.exe version.txt
+      - name: Move apps from before versioned releases over
+        # Apps from before v1.0.0 update from the rolling mac-app and windows-app releases,
+        # comparing commits. Giving them this release moves them onto the versioned ones.
+        continue-on-error: true
+        run: |
+          echo "$GITHUB_SHA" > commit.txt
+          cp commit.txt version.txt
+          if gh release view mac-app >/dev/null 2>&1; then
+            gh release upload mac-app dist/mac/EngineOSEmulator-mac.zip --clobber && gh release upload mac-app version.txt --clobber
+          fi
+          if gh release view windows-app >/dev/null 2>&1; then
+            gh release upload windows-app dist/windows/EngineOSEmulator.exe --clobber && gh release upload windows-app version.txt --clobber
+          fi

@@ -1,20 +1,20 @@
-# Builds the Windows app with Mono and publishes it as the "windows-app" release:
-# https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/EngineOSEmulator.exe
+# Test build of the Windows app and its installer on every change, kept as workflow artifacts.
+# Releases are made by release.yml when VERSION changes.
 name: Windows app
 on:
   push:
     branches: [main]
-    paths: ["windows/EngineOSEmulator.cs", "windows/app.ico", "windows/build.sh", ".github/workflows/windows-app.yml"]
+    paths: ["windows/**", ".github/workflows/windows-app.yml"]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Mono
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel >/dev/null
+      - name: Install Mono and NSIS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel nsis >/dev/null
       - name: Build
         shell: bash
         run: |
@@ -25,20 +25,11 @@ jobs:
             exit 1
           fi
           cat build.log
+      - name: Installer
+        run: makensis -V2 -DVERSION="$(cat VERSION 2>/dev/null || echo 0.0.0)" windows/installer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: EngineOSEmulator-windows
-          path: windows/EngineOSEmulator.exe
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          NOTES="The EngineOS Emulator app for Windows 10 and 11 (runs the emulator in WSL), built from main. Download EngineOSEmulator.exe and run it. Windows may warn the first time because it isn't signed: More info, then Run anyway."
-          gh release view windows-app >/dev/null 2>&1 || gh release create windows-app --title "Windows app" --notes "$NOTES"
-          gh release edit windows-app --notes "$NOTES"
-          gh release upload windows-app windows/EngineOSEmulator.exe --clobber
-          # The download from before the rename to EngineOS Emulator.
-          gh release delete-asset windows-app SCLive4Emulator.exe -y 2>/dev/null || true
-          # Last, so an app that sees the new version can already download it.
-          echo "${{ github.sha }}" > version.txt
-          gh release upload windows-app version.txt --clobber
+          path: |
+            windows/EngineOSEmulator.exe
+            windows/EngineOSEmulator-Setup.exe

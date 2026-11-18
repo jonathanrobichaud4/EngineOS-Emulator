@@ -117,6 +117,8 @@ final class Model: ObservableObject {
         e["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         e["NO_COLOR"] = "1"
         e["ENGINEOS_NO_OPEN"] = "1"   // the app opens the deck page itself, once
+        // "update" moves the emulator to the release matching this app.
+        if BuildInfo.version != "dev" { e["ENGINEOS_VERSION"] = BuildInfo.version }
         return e
     }
 
@@ -454,14 +456,24 @@ final class Model: ObservableObject {
 
     // MARK: updating the app itself
 
-    /// The app is published as the "mac-app" release, with version.txt holding the commit it
-    /// was built from. A different commit there means a newer build: download it, swap this
-    /// app's bundle for it once the app has quit, and open it again.
-    static let release = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/"
+    /// Each release (vX.Y.Z) carries version.txt with its version. A newer one than this app's
+    /// means an update: download that release's zip, swap this app's bundle for it once the app
+    /// has quit, and open it again.
+    static let release = "https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/"
+
+    /// True if version a (like 1.2.10) is newer than b.
+    static func newer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
+            if p != q { return p > q }
+        }
+        return false
+    }
 
     func checkAppUpdate(manual: Bool) {
-        guard BuildInfo.commit != "dev" else {
-            if manual { append("This is a local build (not from the release), so it doesn't update itself.\n") }
+        guard BuildInfo.version != "dev" else {
+            if manual { append("This is a test build (not from a release), so it doesn't update itself.\n") }
             return
         }
         var req = URLRequest(url: URL(string: Model.release + "version.txt")!)
@@ -470,21 +482,21 @@ final class Model: ObservableObject {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             let latest = data.map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
             DispatchQueue.main.async {
-                guard code == 200, latest.count >= 7 else {
+                guard code == 200, latest.first?.isNumber == true else {
                     self.append("Couldn't check for app updates\(err.map { ": \($0.localizedDescription)" } ?? " (HTTP \(code))").\n")
                     return
                 }
                 let d = UserDefaults.standard
-                if latest == BuildInfo.commit {
+                if !Model.newer(latest, than: BuildInfo.version) {
                     d.removeObject(forKey: "updateAttempt")
-                    self.append("The app is up to date (build \(latest.prefix(7))).\n")
+                    self.append("The app is up to date (v\(BuildInfo.version)).\n")
                     return
                 }
                 // Already tried this build and it's still not running: the swap failed. Don't
                 // loop; say why and leave it to "Check for app updates" or a manual download.
                 if !manual, d.string(forKey: "updateAttempt") == latest {
                     let log = (try? String(contentsOf: AppInfo.updateLog, encoding: .utf8)) ?? ""
-                    self.append("The update to build \(latest.prefix(7)) didn't install last time.\n" + log +
+                    self.append("The update to v\(latest) didn't install last time.\n" + log +
                         "If macOS blocked it, allow \(AppInfo.name) under System Settings > Privacy & Security > App Management, " +
                         "then use Check for app updates in Settings. Or download it from the release page.\n")
                     return
@@ -495,7 +507,7 @@ final class Model: ObservableObject {
     }
 
     private func installAppUpdate(_ latest: String) {
-        append("\n> Downloading the new app (build \(latest.prefix(7)))\n")
+        append("\n> Downloading \(AppInfo.name) v\(latest)\n")
         var req = URLRequest(url: URL(string: Model.release + AppInfo.zip)!)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.downloadTask(with: req) { tmp, resp, err in
@@ -538,7 +550,7 @@ final class Model: ObservableObject {
                 let sh = """
                 #!/bin/bash
                 mkdir -p \(q(AppInfo.updateLog.deletingLastPathComponent())); exec >\(q(AppInfo.updateLog)) 2>&1
-                echo "Update to \(latest.prefix(7)), $(date)"
+                echo "Update to v\(latest), $(date)"
                 while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
                 ok=
                 if \(replace ? "true" : "false"); then
@@ -873,7 +885,8 @@ struct SettingsView: View {
             Toggle("Stop the deck and the VM when the app quits", isOn: $m.stopOnQuit)
             HStack {
                 Button("Check for app updates now") { m.checkAppUpdate(manual: true) }
-                Text("Build \(BuildInfo.commit.prefix(7))").foregroundStyle(.secondary).font(.caption)
+                Text(BuildInfo.version == "dev" ? "Test build \(BuildInfo.commit.prefix(7))" : "Version \(BuildInfo.version) (\(BuildInfo.commit.prefix(7)))")
+                    .foregroundStyle(.secondary).font(.caption)
             }
         }
         .padding(20)

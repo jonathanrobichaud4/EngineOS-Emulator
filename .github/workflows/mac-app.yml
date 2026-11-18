@@ -1,5 +1,5 @@
-# Builds the Mac app on a macOS runner and publishes it as the "mac-app" release:
-# https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/EngineOSEmulator-mac.zip
+# Test build of the Mac app on every change: compiles it, packages it and takes a screenshot,
+# kept as workflow artifacts. Releases are made by release.yml when VERSION changes.
 name: Mac app
 on:
   push:
@@ -7,7 +7,7 @@ on:
     paths: ["mac/**", ".github/workflows/mac-app.yml"]
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   build:
     runs-on: macos-latest
@@ -28,18 +28,17 @@ jobs:
           grep -E ': warning: ' build.log | head -20 |
             sed -E 's/^([^:]+):([0-9]+):([0-9]+): warning: (.*)$/::warning file=\1,line=\2,col=\3::\4/' || true
       # Package first: the screenshot run below opens the app, and nothing it does may end up
-      # in the published zip.
+      # in the zip.
       - name: Package
         run: |
           ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
-          # The zip has to hold this build, not anything older.
           unzip -p EngineOSEmulator-mac.zip "EngineOS Emulator.app/Contents/Info.plist" | grep -q "<string>${GITHUB_SHA::7}</string>" ||
             { echo "::error::the packaged app isn't build ${GITHUB_SHA::7}"; exit 1; }
       - name: Screenshot
         continue-on-error: true
         run: |
-          # A copy of the app to look at, with self-update off: left on, it would see the older
-          # version.txt on the release and replace itself with the old download.
+          # A copy of the app to look at, with self-update off (a test build never updates itself
+          # anyway; this is belt and braces).
           defaults write io.github.jonathanrobichaud4.engineos-emulator autoUpdateApp -bool false
           ditto "build/EngineOS Emulator.app" "$RUNNER_TEMP/EngineOS Emulator.app"
           open "$RUNNER_TEMP/EngineOS Emulator.app"
@@ -51,19 +50,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: EngineOSEmulator-mac
-          path: EngineOSEmulator-mac.zip
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          NOTES="The EngineOS Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Download EngineOSEmulator-mac.zip, unzip, move it to Applications, then right-click > Open the first time."
-          gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --title "Mac app" --notes "$NOTES"
-          gh release edit mac-app --notes "$NOTES"
-          gh release upload mac-app EngineOSEmulator-mac.zip --clobber
-          # The download from before the rename to EngineOS Emulator.
-          gh release delete-asset mac-app SCLive4Emulator-mac.zip -y 2>/dev/null || true
-          # Last, so an app that sees the new version can already download it.
-          echo "${{ github.sha }}" > version.txt
-          gh release upload mac-app version.txt --clobber
-          [ -f screenshot.png ] && gh release upload mac-app screenshot.png --clobber || true
-          gh release delete-asset mac-app screenshot-full.png -y 2>/dev/null || true
+          path: |
+            EngineOSEmulator-mac.zip
+            screenshot.png

@@ -23,15 +23,24 @@ Not emulated yet:
 - Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
 
+## Downloads
+
+Every [release](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest) has both apps:
+
+- **Mac:** [EngineOSEmulator-mac.dmg](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator-mac.dmg). Open it and drag the app into Applications.
+- **Windows:** [EngineOSEmulator-Setup.exe](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator-Setup.exe) installs it for your user (no admin needed) with a Start menu entry and an uninstaller, or [EngineOSEmulator.exe](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator.exe) runs without installing.
+
+The apps update themselves to newer releases (an option in their settings) and keep the emulator they run on the same release. Releasing: change `VERSION` (like `1.0.1`) on main, and the Release workflow builds both apps and the installers and publishes them as `v1.0.1`. Every other change only makes test builds, kept as workflow artifacts.
+
 ## Windows app (no command line)
 
-`EngineOSEmulator.exe` is a small Windows program for all of this. [Download it here](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/windows-app/EngineOSEmulator.exe) (the [Windows app release](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/tag/windows-app), rebuilt on every change) and run it; it needs nothing installed beyond Windows 10 or 11.
+`EngineOSEmulator.exe` is a small Windows program for all of this ([download](#downloads)); it needs nothing installed beyond Windows 10 or 11.
 
 - It installs WSL and the emulator for you if they're missing (the emulator goes into `/opt/engineos-emulator` in Ubuntu), and finds an older copy and moves your deck over.
 - **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\EngineOS Emulator`, which is plugged in as the EMULATOR drive.
 - Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker and a **Decks...** window to add, rename and delete decks and choose each one's model (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
 
-Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler).
+Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler), then `makensis windows/installer.nsi` for the installer.
 
 Installed copies from before the rename to EngineOS Emulator update into the new app and keep their decks, settings and drives: the old folders (`Music\SC LIVE 4 Emulator`, `~/SCLive4Emulator`, `/opt/sclive4-emulator`) move to the new names the next time the deck is stopped, and drives are pointed at the new place.
 
@@ -39,7 +48,7 @@ Installed copies from before the rename to EngineOS Emulator update into the new
 
 The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows.
 
-**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/download/mac-app/EngineOSEmulator-mac.zip) (macOS 13 or later, Apple Silicon and Intel), unzip it and move it to Applications. It isn't notarized, so the first time right-click it and choose Open. Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). It's built from `mac/app` on every change (`mac/app/build.sh` builds it yourself).
+**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator-mac.dmg) (macOS 13 or later, Apple Silicon and Intel), open the disk image and drag the app into Applications. It isn't notarized, so the first time right-click it and choose Open (on macOS 15, open it once, then System Settings > Privacy & Security > Open Anyway). Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). `mac/app/build.sh` builds it yourself.
 
 **From Terminal**, `mac/engineos-emu` does the same:
 
