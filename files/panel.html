@@ -304,14 +304,21 @@ function screen(cv){const g=cv.getContext("2d");let seq=0,img=null,frames=0,t0=p
 
 // ---------------------------------------------------------------- audio
 let actx=null,playing=false;
-async function audioLoop(){let pos=0,next=0;
+// Engine under emulation sometimes delivers audio late (it is busy drawing, or the host is).
+// The player keeps a buffer that starts at 0.25 s and grows by 0.1 s (up to 1 s) every time it
+// runs dry, so stalls stop being audible after the first one or two; a fresh start after a
+// gap fades in over 5 ms instead of clicking.
+async function audioLoop(){let pos=0,next=0,target=0.25,fresh=true;
   while(playing){try{const r=await fetch("/audio?pos="+pos,{cache:"no-store"});const b=await r.arrayBuffer();const h=new DataView(b);
       const np=Number(h.getBigUint64(0,true)),rate=h.getUint32(8,true),n=(b.byteLength-12)/4;
       if(!rate||!n){await new Promise(r=>setTimeout(r,200));continue}
-      pos=np;if(!actx||actx.sampleRate!==rate){actx&&actx.close();actx=new AudioContext({sampleRate:rate});next=0}
+      pos=np;if(!actx||actx.sampleRate!==rate){actx&&actx.close();actx=new AudioContext({sampleRate:rate,latencyHint:"playback"});next=0}
       const s=new Int16Array(b,12,n*2),buf=actx.createBuffer(2,n,rate),L=buf.getChannelData(0),R=buf.getChannelData(1);
       for(let i=0;i<n;i++){L[i]=s[2*i]/32768;R[i]=s[2*i+1]/32768}
-      const now=actx.currentTime;if(next<now+0.03||next>now+0.6)next=now+0.12;
+      const now=actx.currentTime;
+      if(next<now+0.01){if(next)target=Math.min(1,target+0.1);next=now+target;fresh=true}
+      else if(next>now+target+0.5)next=now+target,fresh=true;
+      if(fresh){const f=Math.min(n,Math.round(rate*0.005));for(let i=0;i<f;i++){L[i]*=i/f;R[i]*=i/f}fresh=false}
       const src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);src.start(next);next+=n/rate}
     catch(e){await new Promise(r=>setTimeout(r,500))}}}
 $("#listen").onclick=()=>{playing=!playing;$("#listen").classList.toggle("on",playing);$("#listen").textContent=playing?"Listening":"Listen";
