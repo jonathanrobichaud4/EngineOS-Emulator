@@ -1,0 +1,42 @@
+# Builds the Mac app on a macOS runner and publishes it as the "mac-app" release:
+# https://github.com/jonathanrobichaud4/sclive4-emulator/releases/download/mac-app/SCLive4Emulator-mac.zip
+name: Mac app
+on:
+  push:
+    branches: [main]
+    paths: ["mac/**", ".github/workflows/mac-app.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: bash
+        run: |
+          # Compiler errors become annotations, readable without logging in.
+          if ! mac/app/build.sh "$PWD/build" > build.log 2>&1; then
+            cat build.log
+            grep -E '^[^ ]+:[0-9]+:[0-9]+: error: ' build.log | head -30 |
+              sed -E 's/^([^:]+):([0-9]+):([0-9]+): error: (.*)$/::error file=\1,line=\2,col=\3::\4/' || true
+            echo "::error::build failed: $(grep -m1 -E 'error' build.log | cut -c1-300)"
+            exit 1
+          fi
+          cat build.log
+          grep -E ': warning: ' build.log | head -20 |
+            sed -E 's/^([^:]+):([0-9]+):([0-9]+): warning: (.*)$/::warning file=\1,line=\2,col=\3::\4/' || true
+      - name: Package
+        run: ditto -c -k --keepParent "build/SC LIVE 4 Emulator.app" SCLive4Emulator-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SCLive4Emulator-mac
+          path: SCLive4Emulator-mac.zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view mac-app >/dev/null 2>&1 ||
+            gh release create mac-app --title "Mac app" --notes "The SC LIVE 4 Emulator app for macOS 13 or later (Apple Silicon and Intel), built from main. Unzip, move it to Applications, then right-click > Open the first time."
+          gh release upload mac-app SCLive4Emulator-mac.zip --clobber

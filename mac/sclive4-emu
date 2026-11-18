@@ -8,9 +8,12 @@
 #   sclive4-emu stop | restart | status | log
 #   sclive4-emu open | console               open the deck page / the EngineX console
 #   sclive4-emu drive add FOLDER [--sd]      plug a folder in as a USB drive (see below)
+#   sclive4-emu enginex BUNDLE               install an EngineX data bundle (.tar.gz)
+#   sclive4-emu mod-install MOD              install and enable a mod (.tar.gz)
 #   sclive4-emu update                       update the emulator (in the VM and this folder)
 #   sclive4-emu vm-stop                      stop the VM itself (frees its memory)
-#   sclive4-emu uninstall                    delete the VM and everything in it
+#   sclive4-emu uninstall [--yes]            delete the VM and everything in it
+#   sclive4-emu state                        key=value lines for the Mac app (never starts the VM)
 #   sclive4-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
 #                                            shell, info, profiles, identify, reset-data, ...)
 #
@@ -29,6 +32,9 @@ SHARE="$HOME/SCLive4Emulator"
 EMU=/opt/sclive4-emulator/emu.sh
 DECK_URL=http://localhost:8090/
 CONSOLE_URL=http://localhost:8080/
+
+# Homebrew's places too, since an app started from Finder doesn't get the shell's PATH.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH
 
 say() { printf '%s\n' "sclive4-emu: $*"; }
 die() { printf '%s\n' "sclive4-emu: $*" >&2; exit 1; }
@@ -92,6 +98,12 @@ start)
     # In its own session, so the deck keeps running when this command's SSH session to the VM ends.
     vm sudo setsid -w "$EMU" start "$@" </dev/null && { say "deck: $DECK_URL"; open "$DECK_URL"; }
     ;;
+enginex|mod-install)
+    [ $# -ge 1 ] || die "usage: sclive4-emu $cmd FILE.tar.gz"
+    need_vm
+    f="$(vm_path "$1")"; shift
+    if [ "$cmd" = enginex ]; then emu install "$f" "$@"; else emu mod-install "$f" "$@"; fi
+    ;;
 open) open "$DECK_URL" ;;
 console) open "$CONSOLE_URL" ;;
 drive)
@@ -122,11 +134,20 @@ vm-stop)
 uninstall)
     need_lima
     [ -n "$(vm_status)" ] || { say "there's no VM to delete"; exit 0; }
-    printf 'Delete the VM "%s" and the deck inside it? Your files in %s stay. [y/N] ' "$VM" "$SHARE"
-    read -r a; case "$a" in y|Y|yes) ;; *) say "left as it was"; exit 0 ;; esac
+    if [ "${1:-}" != --yes ]; then
+        printf 'Delete the VM "%s" and the deck inside it? Your files in %s stay. [y/N] ' "$VM" "$SHARE"
+        read -r a; case "$a" in y|Y|yes) ;; *) say "left as it was"; exit 0 ;; esac
+    fi
     limactl stop -f "$VM" >/dev/null 2>&1; limactl delete "$VM" && say "deleted"
     ;;
-help|-h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+state)
+    command -v limactl >/dev/null 2>&1 || { echo "lima=missing"; command -v brew >/dev/null 2>&1 && echo brew=yes || echo brew=no; exit 0; }
+    echo "lima=yes"
+    st=$(vm_status); echo "vm=${st:-none}"
+    [ "$st" = Running ] && vm sudo "$EMU" info 2>/dev/null
+    exit 0
+    ;;
+help|-h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
 *)
     need_vm
     emu "$cmd" "$@"
