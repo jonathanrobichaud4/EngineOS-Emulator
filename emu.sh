@@ -106,6 +106,10 @@ deps() {
     python3 -c 'import numpy' 2>/dev/null || miss+=(python3-numpy)
     command -v ffmpeg >/dev/null || miss+=(ffmpeg)
     command -v virgl_test_server >/dev/null || miss+=(virgl-server)
+    # virgl draws with the host's Mesa (llvmpipe when there's no GPU, as in a VM). A minimal
+    # Ubuntu, such as Lima's cloud image on a Mac, may have no Mesa EGL or DRI drivers at all.
+    dpkg -s libegl-mesa0 >/dev/null 2>&1 || miss+=(libegl-mesa0)
+    dpkg -s libgl1-mesa-dri >/dev/null 2>&1 || miss+=(libgl1-mesa-dri)
     if [ ${#miss[@]} -gt 0 ]; then
         say "installing ${miss[*]}"
         apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${miss[@]}"
@@ -391,7 +395,8 @@ running() { [ -f "$STATE/emu.pid" ] && kill -0 "$(cat "$STATE/emu.pid")" 2>/dev/
 
 engine_loop() {
     # Restarts Engine when it exits, like engine.service does (also how the console's restart works).
-    local stock=$1 gl=$2 preload=/usr/lib/libemushim.so n=0 render
+    local stock=$1 gl=$2 preload=/usr/lib/libemushim.so n=0 render t0 glfail=0
+    local soft="QT_QPA_PLATFORM=offscreen:configfile=/etc/emu/screen.json QT_QUICK_BACKEND=software"
     if [ "$gl" = 1 ]; then
         # eglfs on Mesa's surfaceless EGL; the shim turns its window into a pbuffer and reads
         # frames back at each swap. eglfs insists on opening a framebuffer device but only
@@ -401,7 +406,7 @@ engine_loop() {
             QT_QPA_EGLFS_DISABLE_INPUT=1 QT_QPA_EGLFS_NO_LIBINPUT=1 QT_QPA_EGLFS_FB=/dev/null EGL_PLATFORM=surfaceless
             LIBGL_DRIVERS_PATH=/usr/lib/emu-dri GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=/tmp/emu/virgl.sock EMU_GL=1"
     else
-        render="QT_QPA_PLATFORM=offscreen:configfile=/etc/emu/screen.json QT_QUICK_BACKEND=software"
+        render=$soft
     fi
     if [ "$stock" = 0 ] && [ -f "$R/data/enginex/bundle/lib/libengine-ui-hook.so" ]; then
         preload=$preload:${EMU_HOOK:-/data/enginex/bundle/lib/libengine-ui-hook.so}
@@ -409,7 +414,7 @@ engine_loop() {
     while :; do
         if [ -f "$R/tmp/emu/engine-ctl" ] && [ "$(cat "$R/tmp/emu/engine-ctl")" = stop ]; then sleep 1; continue; fi
         rm -f "$R/tmp/emu/engine-ctl"
-        n=$((n + 1))
+        n=$((n + 1)); t0=$(date +%s)
         echo "=== Engine start #$n $(date '+%F %T') preload=$preload" >> "$STATE/engine.log"
         # shellcheck disable=SC2086  # $render is a list of VAR=value words
         in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} LD_PRELOAD="$preload" $render \
@@ -417,6 +422,19 @@ engine_loop() {
             /usr/Engine/Engine -d0 -skipFirmwareUpdate -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
         echo "=== Engine exited $(date '+%F %T')" >> "$STATE/engine.log"
+        # GL that starts but doesn't work (virgl drops Engine as soon as it connects, seen in a
+        # Lima VM on a Mac), or a virgl server that has died: after two of those, finish this run in
+        # software.
+        if [ "$gl" = 1 ] && { { [ $(($(date +%s) - t0)) -lt 30 ] &&
+               tail -n 40 "$STATE/engine.log" | grep -q 'lost connection to rendering server'; } ||
+             ! kill -0 "$(cat "$STATE/virgl.pid" 2>/dev/null)" 2>/dev/null; }; then
+            glfail=$((glfail + 1))
+            if [ $glfail -ge 2 ]; then
+                echo "=== emu: GL rendering isn't working here (Engine keeps losing the virgl server, see $STATE/virgl.log); switching to software rendering. 'emu.sh graphics software' makes that the default." >> "$STATE/engine.log"
+                kill "$(cat "$STATE/virgl.pid" 2>/dev/null)" 2>/dev/null || :; rm -f "$STATE/virgl.pid"
+                gl=0; render=$soft; qml_inject >> "$STATE/engine.log" 2>&1 || :
+            fi
+        fi
         sleep 2
     done
 }

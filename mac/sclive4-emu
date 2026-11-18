@@ -2,6 +2,8 @@
 # SC LIVE 4 emulator for macOS: runs the emulator in a small Lima Linux VM (mac/lima.yaml) and
 # opens the deck in your browser. The Mac counterpart of the Windows app, as a command.
 #
+#   sclive4-emu [--profile DECK] COMMAND ...  DECK: which deck (emu.sh profiles; default: "default").
+#                                            Decks live side by side in the VM, one runs at a time.
 #   sclive4-emu install                      install Lima (Homebrew) and create the VM
 #   sclive4-emu setup FIRMWARE [BUNDLE]      build the deck from an SC LIVE 4 firmware file
 #   sclive4-emu start [--stock]              start the deck and open http://localhost:8090
@@ -13,7 +15,8 @@
 #   sclive4-emu update                       update the emulator (in the VM and this folder)
 #   sclive4-emu vm-stop                      stop the VM itself (frees its memory)
 #   sclive4-emu uninstall [--yes]            delete the VM and everything in it
-#   sclive4-emu state                        key=value lines for the Mac app (never starts the VM)
+#   sclive4-emu state                        key=value lines for the Mac app (never starts the VM),
+#                                            with deck=NAME<TAB>set up<TAB>EngineX<TAB>running lines
 #   sclive4-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
 #                                            shell, info, profiles, identify, reset-data, ...)
 #
@@ -65,8 +68,12 @@ need_vm() {
     esac
 }
 
+PROFILE=
+if [ "${1:-}" = --profile ]; then PROFILE=${2:-}; shift 2; fi
+case "$PROFILE" in default) PROFILE= ;; *[!A-Za-z0-9_-]*) die "deck names are letters, digits, - and _" ;; esac
+
 vm() { limactl shell --workdir / "$VM" "$@"; }
-emu() { vm sudo "$EMU" "$@"; }
+emu() { if [ -n "$PROFILE" ]; then vm sudo "$EMU" --profile "$PROFILE" "$@"; else vm sudo "$EMU" "$@"; fi; }
 
 # A path the VM can see: anything in the home folder as is, anything else copied into ~/SCLive4Emulator.
 vm_path() {
@@ -96,7 +103,8 @@ setup)
 start)
     need_vm
     # In its own session, so the deck keeps running when this command's SSH session to the VM ends.
-    vm sudo setsid -w "$EMU" start "$@" </dev/null && { say "deck: $DECK_URL"; open "$DECK_URL"; }
+    if [ -n "$PROFILE" ]; then set -- --profile "$PROFILE" start "$@"; else set -- start "$@"; fi
+    vm sudo setsid -w "$EMU" "$@" </dev/null && { say "deck: $DECK_URL"; open "$DECK_URL"; }
     ;;
 enginex|mod-install)
     [ $# -ge 1 ] || die "usage: sclive4-emu $cmd FILE.tar.gz"
@@ -144,7 +152,18 @@ state)
     command -v limactl >/dev/null 2>&1 || { echo "lima=missing"; command -v brew >/dev/null 2>&1 && echo brew=yes || echo brew=no; exit 0; }
     echo "lima=yes"
     st=$(vm_status); echo "vm=${st:-none}"
-    [ "$st" = Running ] && vm sudo "$EMU" info 2>/dev/null
+    [ "$st" = Running ] || exit 0
+    emu info 2>/dev/null
+    # Every deck: name, set up, EngineX version, running.
+    vm sudo sh -c 'cd /opt/sclive4-emulator 2>/dev/null || exit 0
+        for d in rootfs rootfs-*; do
+            [ -d "$d" ] || continue
+            n=${d#rootfs}; n=${n#-}; [ -n "$n" ] || n=default
+            s=state${d#rootfs}; set=no; run=no
+            [ -x "$d/usr/Engine/Engine" ] && set=yes
+            [ -f "$s/emu.pid" ] && kill -0 "$(cat "$s/emu.pid")" 2>/dev/null && run=yes
+            printf "deck=%s\t%s\t%s\t%s\n" "$n" "$set" "$(head -n1 "$d/data/enginex/version.txt" 2>/dev/null)" "$run"
+        done' 2>/dev/null
     exit 0
     ;;
 help|-h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
