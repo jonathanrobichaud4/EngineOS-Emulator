@@ -36,6 +36,17 @@ enum AppInfo {
         d.set(true, forKey: "migratedFromSCLive4")
     }()
 
+    /// The app bundle's real location, even when macOS is running it from a translocated copy.
+    static func originalBundleURL() -> URL {
+        let here = Bundle.main.bundleURL
+        guard here.path.contains("/AppTranslocation/"),
+              let lib = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW),
+              let sym = dlsym(lib, "SecTranslocateCreateOriginalPathForURL") else { return here }
+        typealias F = @convention(c) (CFURL, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Unmanaged<CFURL>?
+        let f = unsafeBitCast(sym, to: F.self)
+        return f(here as CFURL, nil)?.takeRetainedValue() as URL? ?? here
+    }
+
     static func savedDeck() -> String {
         _ = migrated
         return UserDefaults.standard.string(forKey: "deck") ?? "default"
@@ -72,6 +83,8 @@ final class Model: ObservableObject {
     @AppStorage("autoUpdate") var autoUpdate = true
     @AppStorage("softwareRender") var softwareRender = false
     @AppStorage("autoUpdateApp") var autoUpdateApp = true
+    @AppStorage("stopOnQuit") var stopOnQuit = true
+    var updating = false   // quitting to install an app update: leave the deck alone
 
     /// The selected deck ("default" is emu.sh's unnamed profile).
     @Published var deck: String = AppInfo.savedDeck() {
@@ -395,19 +408,30 @@ final class Model: ObservableObject {
                 guard unzip.terminationStatus == 0,
                       let newApp = try fm.contentsOfDirectory(at: work, includingPropertiesForKeys: nil).first(where: { $0.pathExtension == "app" })
                 else { fail("the download didn't contain the app"); return }
-                let old = Bundle.main.bundleURL
-                guard fm.isWritableFile(atPath: old.deletingLastPathComponent().path) else {
-                    fail("can't write to \(old.deletingLastPathComponent().path); download it from the release page instead"); return
+                // Where the app really is. An app opened straight from Downloads runs from a
+                // read-only copy macOS makes ("App Translocation"); the original is what to replace.
+                let old = AppInfo.originalBundleURL()
+                var folder = old.deletingLastPathComponent()
+                var replace = true
+                if !fm.isWritableFile(atPath: folder.path) {
+                    // Can't touch the original: put the new app in Applications instead.
+                    let apps = URL(fileURLWithPath: "/Applications")
+                    let mine = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+                    if fm.isWritableFile(atPath: apps.path) { folder = apps }
+                    else { try? fm.createDirectory(at: mine, withIntermediateDirectories: true); folder = mine }
+                    replace = false
                 }
                 // Swap the bundles after this app quits, then open the new one. It goes in under
                 // its own name, so an install from before the rename picks up the new name.
-                let dest = old.deletingLastPathComponent().appendingPathComponent(newApp.lastPathComponent)
+                let dest = folder.appendingPathComponent(newApp.lastPathComponent)
                 let script = work.appendingPathComponent("swap.sh")
                 let sh = """
                 #!/bin/bash
                 while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
-                rm -rf "\(old.path).old" && mv "\(old.path)" "\(old.path).old" && mv "\(newApp.path)" "\(dest.path)" &&
-                  xattr -dr com.apple.quarantine "\(dest.path)" 2>/dev/null
+                \(replace ? "rm -rf \"\(old.path).old\" && mv \"\(old.path)\" \"\(old.path).old\"" : "rm -rf \"\(dest.path)\"") &&
+                  mv "\(newApp.path)" "\(dest.path)"
+                # Without the quarantine flag macOS runs it in place from now on (no translocation).
+                xattr -dr com.apple.quarantine "\(dest.path)" 2>/dev/null
                 rm -rf "\(old.path).old"
                 open "\(dest.path)"
                 """
@@ -417,6 +441,8 @@ final class Model: ObservableObject {
                 p.arguments = [script.path]
                 try p.run()
                 DispatchQueue.main.async {
+                    if !replace { self.append("Installed the new app in \(folder.path) (couldn't replace the copy in \(old.deletingLastPathComponent().path)). You can delete the old one.\n") }
+                    self.updating = true
                     self.append("Restarting with the new app...\n")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { NSApp.terminate(nil) }
                 }
@@ -665,6 +691,7 @@ struct SettingsView: View {
             Toggle("Update the emulator when the app opens", isOn: $m.autoUpdate)
             Toggle("Software rendering (if the screen looks wrong)", isOn: $m.softwareRender)
             Toggle("Update this app automatically", isOn: $m.autoUpdateApp)
+            Toggle("Stop the deck and the VM when the app quits", isOn: $m.stopOnQuit)
             HStack {
                 Button("Check for app updates now") { m.checkAppUpdate(manual: true) }
                 Text("Build \(BuildInfo.commit.prefix(7))").foregroundStyle(.secondary).font(.caption)
@@ -679,6 +706,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: Model?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) { model?.quit() }
+
+    /// Quitting stops the deck and the VM (unless that's turned off in Settings), so nothing keeps
+    /// running in the background. The app waits for it, up to a minute.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let m = model, m.stopOnQuit, !m.updating, m.vm == "Running", !m.script.isEmpty else { return .terminateNow }
+        m.append("\n> Stopping the deck and the VM before quitting\n")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: m.script)
+        p.arguments = ["vm-stop"]
+        p.environment = m.env
+        var done = false
+        let finish = { DispatchQueue.main.async { if !done { done = true; sender.reply(toApplicationShouldTerminate: true) } } }
+        p.terminationHandler = { _ in finish() }
+        do { try p.run() } catch { return .terminateNow }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { p.terminate(); finish() }
+        return .terminateLater
+    }
 }
 
 @main

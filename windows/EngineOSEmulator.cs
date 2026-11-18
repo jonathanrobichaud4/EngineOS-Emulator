@@ -833,7 +833,10 @@ namespace EngineOSEmulator
             };
             var updApp = new ToolStripMenuItem("Update this app automatically") { Checked = Option("AutoUpdateApp", true), CheckOnClick = true };
             updApp.CheckedChanged += (s, e) => SetOption("AutoUpdateApp", updApp.Checked);
+            var stopClose = new ToolStripMenuItem("Stop the deck when this app closes") { Checked = Option("StopOnClose", true), CheckOnClick = true };
+            stopClose.CheckedChanged += (s, e) => SetOption("StopOnClose", stopClose.Checked);
             m.Items.Add(auto);
+            m.Items.Add(stopClose);
             m.Items.Add(upd);
             m.Items.Add(updApp);
             m.Items.Add(sw);
@@ -1063,6 +1066,17 @@ namespace EngineOSEmulator
         {
             SaveWindow();
             if (Get("running", "no") != "yes" || wsl.EmuDir.Length == 0) { StopKeepAlive(); return; }
+            if (Option("StopOnClose", true))
+            {
+                // Stop the deck so nothing keeps running in the background (Settings can turn this off).
+                e.Cancel = true;
+                Hide();
+                await wsl.Run(wsl.Emu(CurrentProfile, "stop"), null);
+                StopKeepAlive();
+                FormClosing -= OnClosing;
+                Close();
+                return;
+            }
             var r = MessageBox.Show(this, "The emulated deck is still running.\n\nStop it before closing?\n(No leaves it running in the background.)",
                                     AppInfo.Name, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (r == DialogResult.Cancel) { e.Cancel = true; return; }
