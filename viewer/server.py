@@ -10,7 +10,6 @@ from .drives import Drives
 from .forward import forward
 from .frames import Fifo, Frames
 from .surface import Surface
-from .waves import Waves
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -45,7 +44,6 @@ def main():
     surface = Surface(emu, json.loads(panel_json))
     audio = Audio(emu)
     drives = Drives(a.drives)
-    Waves(a.rootfs)
     with open(os.path.join(WEB, "index.html"), encoding="utf-8") as f:
         page = f.read().replace("__CONSOLE__", a.console).encode()
     statics = {}

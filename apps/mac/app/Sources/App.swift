@@ -18,7 +18,6 @@ struct SettingsView: View {
             Toggle("Start the deck when the app opens", isOn: $m.autoStart)
             Toggle("Open the deck page after starting", isOn: $m.openDeck)
             Toggle("Update the emulator when the app opens", isOn: $m.autoUpdate)
-            Toggle("Software rendering (if the screen looks wrong)", isOn: $m.softwareRender)
             Toggle("Update this app automatically", isOn: $m.autoUpdateApp)
             Toggle("Stop the deck and the VM when the app quits", isOn: $m.stopOnQuit)
             HStack {

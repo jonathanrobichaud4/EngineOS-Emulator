@@ -89,6 +89,10 @@ class Cli(unittest.TestCase):
     def test_models(self):
         self.assertEqual(emu("models").split("\n")[0], "JP21\tSC LIVE 4")
 
+    def test_graphics_is_opengl_only(self):
+        # Older apps run `graphics auto|software` before starting a deck; it has to keep working.
+        self.assertIn("OpenGL", emu("graphics", "software"))
+
     def test_help(self):
         out = emu(check=False)
         self.assertIn("sudo ./emu.sh setup FIRMWARE.img", out)

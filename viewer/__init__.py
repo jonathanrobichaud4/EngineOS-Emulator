@@ -3,7 +3,7 @@
 Serves http://localhost:PORT/ with the deck's top panel: the touchscreen in the middle (frames
 from the shim in Engine) and every control around it, wired to Engine as the deck's internal
 MIDI devices would be. Also streams Engine's audio output, manages the emulated USB drives / SD
-card, and can reboot the emulated deck. Standard library only (numpy for the waveforms).
+card, and can reboot the emulated deck. Standard library only.
 
 Run by engine/emu.sh as `python3 -m viewer` from the checkout. The modules:
 
@@ -12,7 +12,6 @@ Run by engine/emu.sh as `python3 -m viewer` from the checkout. The modules:
   surface    the control surface: panel events to MIDI, Engine's MIDI to LED state
   displays   decoders for the decks' own displays (Prime 4 jog wheel screens and FX OLEDs)
   audio      Engine's audio output
-  waves      software waveforms for Engine's waveform views
   drives     drives.txt
   forward    a TCP forwarder into the deck's network namespace
   web/       the page itself (index.html, panel.css and the scripts)

@@ -15,7 +15,6 @@ final class Model: ObservableObject {
     @AppStorage("autoStart") var autoStart = false
     @AppStorage("openDeck") var openDeck = true
     @AppStorage("autoUpdate") var autoUpdate = true
-    @AppStorage("softwareRender") var softwareRender = false
     @AppStorage("autoUpdateApp") var autoUpdateApp = true
     @AppStorage("stopOnQuit") var stopOnQuit = true
     var updating = false   // quitting to install an app update: leave the deck alone
@@ -204,11 +203,8 @@ final class Model: ObservableObject {
     }
 
     private func startSelected() {
-        let graphics = softwareRender ? "software" : "auto"
-        run(["graphics", graphics], title: "Setting graphics to \(graphics)") { _ in
-            self.run(["start"], title: "Starting the \(self.deck) deck") { code in
-                if code == 0 && self.openDeck { NSWorkspace.shared.open(self.deckURL) }
-            }
+        run(["start"], title: "Starting the \(deck) deck") { code in
+            if code == 0 && self.openDeck { NSWorkspace.shared.open(self.deckURL) }
         }
     }
     func stop() { run(["stop"], title: "Stopping the deck") }

@@ -61,7 +61,7 @@ cd engineos-emulator/apps/mac
 ```
 
 - After that, double-click **Start EngineOS Emulator.command** in Finder to start it (the first time, right-click > Open).
-- `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./engineos-emu graphics software`, `./engineos-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
+- `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./engineos-emu shell`, `./engineos-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
 - Your home folder is visible in the VM read-only, so firmware and mod files can be anywhere in it. **Drives:** Engine writes its library onto a drive, so put folders you plug in as drives in `~/EngineOSEmulator` (writable from the VM): `./engineos-emu drive add ~/EngineOSEmulator/Music`.
 - It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`apps/mac/lima.yaml` sets these).
 - On Apple Silicon the VM is ARM64 Linux. Apple's chips can't run Engine's 32-bit ARM code directly, so it still goes through qemu-arm, as on a PC.
@@ -93,7 +93,7 @@ Updating: `sudo ./emu.sh stop`, then `git pull`, then `sudo ./emu.sh start`. You
 
 Engine draws its UI with OpenGL ES. The emulator gives it a Mesa virgl driver (`assets/gl/`, built for the firmware's Mesa 24.0.7), so Engine's GL calls go over a socket to `virgl_test_server` on your PC, which draws them natively with Mesa (on the CPU with llvmpipe, or your GPU where WSL exposes one). The idea comes from [QEngine](https://github.com/Peyton-C/QEngine), which does the same through a QEMU VM's virtual GPU; here it runs over virgl's vtest socket, so the deck keeps running under qemu-user with its audio and controls.
 
-If the screen looks wrong on your PC, switch to software rendering: tick "Software rendering" in the Windows app's More... menu, or run `./emu.sh graphics software` (`auto` to go back), then restart the deck. Software rendering draws everything except shader effects; the emulator then draws its own waveforms from the audio (no beat grid or markers) and plain versions of a few faded and coloured elements.
+OpenGL is the only way it renders (the software renderer from before 1.3 is gone). If it can't work on a machine, the deck doesn't start and says why: the virgl server didn't start, Engine keeps losing it, or the firmware's Mesa version doesn't match the bundled driver (`sudo tools/build_mesa_virgl.sh VERSION` builds one for it).
 
 ## Running it
 
@@ -190,10 +190,8 @@ To test a different stock firmware, run `setup` again with the other `.img`. It 
 - qemu-user runs the ARM binaries through binfmt_misc inside a chroot of that root file system.
 - `assets/fakesys.tar.gz` is a fake `/sys` made from the SC LIVE 4 device tree (product code JP21, CPU info, a non-blank eFuse). Without it Engine decides it's on a factory board and drops into test mode. All identifiers in it are placeholders.
 - `engine/shim/libemushim.so` is preloaded into Engine (source in `engine/shim/`):
-  - `emushim.c` copies every frame into `/tmp/emu/fb` (in OpenGL mode it turns eglfs's window into a pbuffer on Mesa's surfaceless EGL and reads each frame back at the buffer swap), turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `assets/qml/`, and reports crashes with the library and offset.
+  - `emushim.c` copies every frame into `/tmp/emu/fb` (it turns eglfs's window into a pbuffer on Mesa's surfaceless EGL and reads each frame back at the buffer swap), turns screen input into touch events, stubs the CPU affinity calls qemu can't do, writes Engine's built-in QML out for `dump-qml`, and reports crashes with the library and offset.
   - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (on the SC LIVE 4: Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget; each model's cards and MIDI devices come from its `model.json`); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
-- Software rendering only: `assets/qml/` replaces built-in QML that needs shaders (`ColoredImage`, which every icon goes through, and the faded scrolling text), and the waveforms come from the viewer (`viewer/waves.py`), which renders each loaded track to PNGs. The QML that shows them is in `assets/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
-- Software rendering only: `engine/tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
 - `engine/edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
 - The viewer (`viewer/`) serves the page (`viewer/web/`, drawn from the model's `panel.json`), turns panel actions into the deck's MIDI messages (`models/gen` holds the maps, taken from Engine's own assignment files), answers Engine's "report all controls" query like the hardware does, decodes the decks' own displays, and streams the audio.
 - Networking: the deck runs in its own network namespace with an `eth0`, gets an address from the firmware's own `udhcpd` on the PC side, and runs its own `connmand` (set to leave your PC's clock alone). `/proc/interrupts` and `/proc/irq` are faked inside so Engine finds its control-surface serial port.
@@ -208,7 +206,7 @@ The code is split by job; [docs/layout.md](docs/layout.md) is the map:
 | `engine/` | The Linux side: `emu.sh` (the command line) and `lib/` (setup, mounts, network, drives, decks, running), the shim, the firmware readers |
 | `viewer/` | The deck page: a Python package (`python3 -m viewer`) and the page itself in `viewer/web/` |
 | `models/` | One folder per deck model: `model.json` and the panel, and the generators in `models/gen/` |
-| `assets/` | Files that go into the deck: the fake `/sys`, QML stand-ins, the virgl Mesa driver |
+| `assets/` | Files that go into the deck: the fake `/sys`, the virgl Mesa driver, a stand-in `systemctl` |
 | `apps/` | The Mac app and launcher, and the Windows app |
 | `tests/` | `sudo tests/run.sh` runs every check that doesn't need a firmware file (CI runs it too) |
 | `docs/` | How it fits together, the models, the command line the apps use, the display protocol, releasing |

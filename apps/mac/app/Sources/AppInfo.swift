@@ -22,7 +22,7 @@ enum AppInfo {
         let d = UserDefaults.standard
         guard !d.bool(forKey: "migratedFromSCLive4"),
               let old = UserDefaults(suiteName: "io.github.jonathanrobichaud4.sclive4-emulator") else { return }
-        for k in ["autoStart", "openDeck", "autoUpdate", "softwareRender", "autoUpdateApp", "deck"]
+        for k in ["autoStart", "openDeck", "autoUpdate", "autoUpdateApp", "deck"]
             where d.object(forKey: k) == nil {
             if let v = old.object(forKey: k) { d.set(v, forKey: k) }
         }

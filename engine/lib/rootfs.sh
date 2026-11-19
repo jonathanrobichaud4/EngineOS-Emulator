@@ -57,14 +57,8 @@ prepare_rootfs() {
     cp "$QEMU" "$R/usr/bin/qemu-arm-static"
     cp "$QEMU" "$R/usr/bin/qemu-arm"
     cp "$ENGINE/shim/libemushim.so" "$R/usr/lib/libemushim.so"
-    cp "$ASSETS/screen.json" "$R/etc/emu/screen.json"
-    rm -rf "$R/etc/emu/qml"; [ ! -d "$ASSETS/qml" ] || cp -r "$ASSETS/qml" "$R/etc/emu/qml"
-    # Engine items that need OpenGL (waveforms); found per Engine build, cached by its size+mtime
-    local stamp; stamp=$(stat -c '%s %Y' "$R/usr/Engine/Engine")
-    if [ "$(head -n1 "$R/etc/emu/gl-items.txt" 2>/dev/null)" != "# $stamp" ]; then
-        { echo "# $stamp"; python3 "$ENGINE/tools/gl_items.py" "$R/usr/Engine/Engine" "$R/lib/libQt6Quick.so.6" 2>/dev/null; } \
-            > "$R/etc/emu/gl-items.txt" || :
-    fi
+    # Left by emulators before 1.3, which could also render without OpenGL.
+    rm -rf "$R/etc/emu/qml" "$R/etc/emu/qml-inject" "$R/etc/emu/qml-gen" "$R/etc/emu/screen.json" "$R/etc/emu/gl-items.txt"
     block_telemetry
     rm -rf "$R/usr/lib/emu-dri"
     if [ -f "$ASSETS/gl/swrast_dri.so" ]; then
@@ -108,32 +102,6 @@ mounts_up() {
         grep -v '^nameserver 127' /etc/resolv.conf > "$R/run/connman/resolv.conf" 2>/dev/null || :
         echo "nameserver 1.1.1.1" >> "$R/run/connman/resolv.conf"
     fi
-}
-
-# The emulator's QML additions (assets/qml-inject): Engine's waveforms need OpenGL, so the emulator
-# switches those items off and adds its own software-drawn waveform to their QML. The shim adds
-# the snippets to Engine's compiled-in files; EngineX's UI pack has its own copies of some of
-# them, so those get an injected copy bind-mounted over them while the deck runs.
-qml_inject() {
-    local spec res src rel gen
-    rm -rf "$R/etc/emu/qml-inject" "$R/etc/emu/qml-gen"
-    for spec in "$ASSETS"/qml-inject/*.inject; do
-        [ -f "$spec" ] || continue
-        res=$(sed -n 's/^path: //p' "$spec" | head -n1)
-        mkdir -p "$R/etc/emu/qml-inject$(dirname "$res")"
-        cp "$spec" "$R/etc/emu/qml-inject$res"
-        for src in "$R"/data/enginex/ui/packs/*"$res"; do
-            [ -f "$src" ] || continue
-            grep -qF " $src " /proc/self/mounts && continue
-            rel=${src#"$R"/data/enginex/ui/}; gen="$R/etc/emu/qml-gen/$rel"
-            mkdir -p "$(dirname "$gen")"
-            if python3 "$ENGINE/tools/qml_inject.py" "$spec" "$src" "$gen"; then
-                mount --bind "$gen" "$src" || :
-            else
-                say "note: ${spec##*/} doesn't fit EngineX's $rel (waveforms stay blank there)"
-            fi
-        done
-    done
 }
 
 mounts_down() {

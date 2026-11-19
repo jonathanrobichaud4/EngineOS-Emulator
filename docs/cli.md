@@ -22,7 +22,8 @@ The selected deck (`--profile NAME`), every deck, the drives and the models, in 
 }
 ```
 
-`engine_error` is set when Engine stopped because the firmware doesn't run as the deck's model.
+`engine_error` is set when Engine stopped for good: the firmware doesn't run as the deck's model,
+or OpenGL isn't working on this machine.
 `engine` is `up` while the Engine process exists, which is a while before its first screen.
 
 `emu.sh profiles --json`, `emu.sh drive list --json` and `emu.sh models --json` print the

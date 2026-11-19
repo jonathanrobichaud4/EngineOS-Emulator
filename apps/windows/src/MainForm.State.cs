@@ -235,7 +235,7 @@ namespace EngineOSEmulator
                 string err = Get("engine_error", "");
                 if (!busy && err.Length > 0)
                 {
-                    statusLabel.Text = "Engine stopped: wrong firmware for this model";
+                    statusLabel.Text = "Engine stopped: " + (err.Length > 70 ? err.Substring(0, 70) + "..." : err);
                     SetDot("error");
                     if (err != lastEngineError) Log("Engine stopped: " + err);
                 }

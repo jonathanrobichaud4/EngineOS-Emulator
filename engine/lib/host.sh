@@ -43,9 +43,6 @@ deps() {
     command -v iptables >/dev/null || miss+=(iptables)
     command -v nsenter >/dev/null || miss+=(util-linux)
     python3 -c 'import jeepney' 2>/dev/null || miss+=(python3-jeepney)
-    # The software waveforms: ffmpeg decodes the tracks, numpy splits them into bands.
-    python3 -c 'import numpy' 2>/dev/null || miss+=(python3-numpy)
-    command -v ffmpeg >/dev/null || miss+=(ffmpeg)
     command -v virgl_test_server >/dev/null || miss+=(virgl-server)
     # virgl draws with the host's Mesa (llvmpipe when there's no GPU, as in a VM). A minimal
     # Ubuntu, such as Lima's cloud image on a Mac, may have no Mesa EGL or DRI drivers at all.
@@ -76,26 +73,13 @@ binfmt() {
 # OpenGL through virgl (the approach QEngine uses, https://github.com/Peyton-C/QEngine, here over
 # vtest instead of a VM's virtio-gpu): Engine's Mesa gets a virgl driver (assets/gl, built by
 # tools/build_mesa_virgl.sh for the firmware's exact Mesa version) and sends its GL over a socket
-# to virgl_test_server, which draws it natively on the PC. Shaders work, so Engine's own
-# waveforms, coloured icons and effects draw, and the software stand-ins stand down.
-# Sets GL=1 or 0.
+# to virgl_test_server, which draws it natively on the PC. It's the only way the emulator renders,
+# so this stops with the reason when it can't work.
 gl_ready() {
-    GL=0
-    [ "$EMU_GL" = 0 ] && return 0
     local want have=""
     want=$(cat "$ASSETS/gl/MESA_VERSION" 2>/dev/null)
     have=$(grep -aoE -m1 'Mesa [0-9]+\.[0-9]+(\.[0-9]+)?' "$R/usr/lib/dri/swrast_dri.so" 2>/dev/null | head -n1 | sed 's/^Mesa //')
-    if [ -z "$want" ] || [ ! -f "$ASSETS/gl/swrast_dri.so" ]; then
-        [ "$EMU_GL" = 1 ] && die "no virgl Mesa driver in assets/gl (see tools/build_mesa_virgl.sh)"
-        return 0
-    fi
-    if [ "$have" != "$want" ]; then
-        [ "$EMU_GL" = 1 ] && die "this firmware has Mesa ${have:-?}; assets/gl is built for $want (rebuild with tools/build_mesa_virgl.sh $have)"
-        say "note: firmware Mesa ${have:-?} doesn't match the bundled $want driver; using software rendering"
-        return 0
-    fi
-    command -v virgl_test_server >/dev/null || {
-        [ "$EMU_GL" = 1 ] && die "virgl_test_server is missing (sudo apt install virgl-server)"
-        return 0; }
-    GL=1
+    [ -n "$want" ] && [ -f "$ASSETS/gl/swrast_dri.so" ] || die "no virgl Mesa driver in assets/gl (see tools/build_mesa_virgl.sh)"
+    [ "$have" = "$want" ] || die "this firmware has Mesa ${have:-?}, and assets/gl is built for Mesa $want. Rebuild it for this firmware: sudo tools/build_mesa_virgl.sh $have"
+    command -v virgl_test_server >/dev/null || die "virgl_test_server is missing (sudo apt install virgl-server)"
 }

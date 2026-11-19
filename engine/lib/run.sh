@@ -5,19 +5,14 @@
 engine_loop() {
     rm -f "$STATE/engine-error"
     # Restarts Engine when it exits, like engine.service does (also how the console's restart works).
-    local stock=$1 gl=$2 preload=/usr/lib/libemushim.so n=0 render t0 glfail=0
-    local soft="QT_QPA_PLATFORM=offscreen:configfile=/etc/emu/screen.json QT_QUICK_BACKEND=software"
-    if [ "$gl" = 1 ]; then
-        # eglfs on Mesa's surfaceless EGL; the shim turns its window into a pbuffer and reads
-        # frames back at each swap. eglfs insists on opening a framebuffer device but only
-        # needs it for the size, which is given here, so /dev/null does. 339x212 mm keeps Qt's 96 dpi, the same as software mode.
-        render="QT_QPA_PLATFORM=eglfs QT_QPA_EGLFS_INTEGRATION=none QT_QPA_EGLFS_WIDTH=1280 QT_QPA_EGLFS_HEIGHT=800
-            QT_QPA_EGLFS_PHYSICAL_WIDTH=339 QT_QPA_EGLFS_PHYSICAL_HEIGHT=212 QT_QPA_EGLFS_HIDECURSOR=1
-            QT_QPA_EGLFS_DISABLE_INPUT=1 QT_QPA_EGLFS_NO_LIBINPUT=1 QT_QPA_EGLFS_FB=/dev/null EGL_PLATFORM=surfaceless
-            LIBGL_DRIVERS_PATH=/usr/lib/emu-dri GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=/tmp/emu/virgl.sock EMU_GL=1"
-    else
-        render=$soft
-    fi
+    local stock=$1 preload=/usr/lib/libemushim.so n=0 t0 glfail=0 msg
+    # eglfs on Mesa's surfaceless EGL; the shim turns its window into a pbuffer and reads frames
+    # back at each swap. eglfs insists on opening a framebuffer device but only needs it for the
+    # size, which is given here, so /dev/null does. 339x212 mm keeps Qt at 96 dpi.
+    local render="QT_QPA_PLATFORM=eglfs QT_QPA_EGLFS_INTEGRATION=none QT_QPA_EGLFS_WIDTH=1280 QT_QPA_EGLFS_HEIGHT=800
+        QT_QPA_EGLFS_PHYSICAL_WIDTH=339 QT_QPA_EGLFS_PHYSICAL_HEIGHT=212 QT_QPA_EGLFS_HIDECURSOR=1
+        QT_QPA_EGLFS_DISABLE_INPUT=1 QT_QPA_EGLFS_NO_LIBINPUT=1 QT_QPA_EGLFS_FB=/dev/null EGL_PLATFORM=surfaceless
+        LIBGL_DRIVERS_PATH=/usr/lib/emu-dri GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=/tmp/emu/virgl.sock EMU_GL=1"
     if [ "$stock" = 0 ] && [ -f "$R/data/enginex/bundle/lib/libengine-ui-hook.so" ]; then
         preload=$preload:${EMU_HOOK:-/data/enginex/bundle/lib/libengine-ui-hook.so}
     fi
@@ -32,29 +27,27 @@ engine_loop() {
             /usr/Engine/Engine -d0 -skipFirmwareUpdate -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
         echo "=== Engine exited $(date '+%F %T')" >> "$STATE/engine.log"
-        # Quit straight to "TestApp": this firmware doesn't run as this model. Say so and stop
-        # restarting it.
+        msg=
+        # Quit straight to "TestApp": this firmware doesn't run as this model.
         if [ "$(cat "$R/tmp/engine-quit-reason" 2>/dev/null)" = TestApp ] && [ $(($(date +%s) - t0)) -lt 120 ]; then
-            local msg="this firmware doesn't run as a $(product_name "$PRODUCT"): $MODEL_RUNS_AS. Change the deck's model or set it up with the right firmware."
+            rm -f "$R/tmp/engine-quit-reason"
+            msg="this firmware doesn't run as a $(product_name "$PRODUCT"): $MODEL_RUNS_AS. Change the deck's model or set it up with the right firmware."
+        # OpenGL that starts but doesn't work (virgl drops Engine as soon as it connects), or a
+        # virgl server that has died, twice in a row.
+        elif { [ $(($(date +%s) - t0)) -lt 30 ] && tail -n 40 "$STATE/engine.log" | grep -q 'lost connection to rendering server'; } ||
+             ! kill -0 "$(cat "$STATE/virgl.pid" 2>/dev/null)" 2>/dev/null; then
+            glfail=$((glfail + 1))
+            [ $glfail -lt 2 ] || msg="OpenGL isn't working here: Engine keeps losing the virgl server (see $STATE/virgl.log)."
+        else
+            glfail=0
+        fi
+        # Say why and stop restarting it.
+        if [ -n "$msg" ]; then
             echo "=== emu: $msg" >> "$STATE/engine.log"
             echo "$msg" > "$STATE/engine-error"
-            rm -f "$R/tmp/engine-quit-reason"
             return 0
         fi
         rm -f "$STATE/engine-error"
-        # GL that starts but doesn't work (virgl drops Engine as soon as it connects, seen in a
-        # Lima VM on a Mac), or a virgl server that has died: after two of those, finish this run in
-        # software.
-        if [ "$gl" = 1 ] && { { [ $(($(date +%s) - t0)) -lt 30 ] &&
-               tail -n 40 "$STATE/engine.log" | grep -q 'lost connection to rendering server'; } ||
-             ! kill -0 "$(cat "$STATE/virgl.pid" 2>/dev/null)" 2>/dev/null; }; then
-            glfail=$((glfail + 1))
-            if [ $glfail -ge 2 ]; then
-                echo "=== emu: GL rendering isn't working here (Engine keeps losing the virgl server, see $STATE/virgl.log); switching to software rendering. 'emu.sh graphics software' makes that the default." >> "$STATE/engine.log"
-                kill "$(cat "$STATE/virgl.pid" 2>/dev/null)" 2>/dev/null || :; rm -f "$STATE/virgl.pid"
-                gl=0; render=$soft; qml_inject >> "$STATE/engine.log" 2>&1 || :
-            fi
-        fi
         sleep 2
     done
 }
@@ -69,10 +62,8 @@ cmd_start() {
             die "another profile is running ($(basename "$(dirname "$other")")); stop it first"
     done
     local stock=0; [ "${1:-}" = --stock ] && stock=1
-    deps; binfmt; prepare_rootfs >/dev/null; mounts_up; gl_ready
-    [ "$GL" = 1 ] || qml_inject
+    deps; gl_ready; binfmt; prepare_rootfs >/dev/null; mounts_up
     mkdir -p "$STATE"; : > "$STATE/engine.log"
-    rm -rf "$R/tmp/emu/wave/req"
     [ -S "$R/run/dbus/system_bus_socket" ] || in_root /usr/bin/dbus-daemon --system --fork --nopidfile
     net_up
     python3 "$ENGINE/edisks_emu.py" --rootfs "$R" --drives "$DATA/drives.txt" </dev/null > "$STATE/edisks.log" 2>&1 &
@@ -81,20 +72,17 @@ cmd_start() {
         in_deck /data/enginex/bundle/bin/stream-sync --listen ":$CONSOLE_PORT" > "$STATE/stream-sync.log" 2>&1 &
         echo $! > "$STATE/stream-sync.pid"
     fi
-    if [ "$GL" = 1 ]; then
-        mkdir -p "$R/tmp/emu"; rm -f "$R/tmp/emu/virgl.sock"
-        virgl_test_server --use-egl-surfaceless --socket-path "$R/tmp/emu/virgl.sock" \
-            </dev/null > "$STATE/virgl.log" 2>&1 &
-        echo $! > "$STATE/virgl.pid"
-        local w
-        for w in $(seq 1 20); do [ -S "$R/tmp/emu/virgl.sock" ] && break; sleep 0.25; done
-        if [ ! -S "$R/tmp/emu/virgl.sock" ]; then
-            say "note: the virgl server didn't start (see $STATE/virgl.log); using software rendering"
-            kill "$(cat "$STATE/virgl.pid")" 2>/dev/null || :; rm -f "$STATE/virgl.pid"
-            GL=0; qml_inject
-        fi
+    mkdir -p "$R/tmp/emu"; rm -f "$R/tmp/emu/virgl.sock"
+    virgl_test_server --use-egl-surfaceless --socket-path "$R/tmp/emu/virgl.sock" \
+        </dev/null > "$STATE/virgl.log" 2>&1 &
+    echo $! > "$STATE/virgl.pid"
+    local w
+    for w in $(seq 1 20); do [ -S "$R/tmp/emu/virgl.sock" ] && break; sleep 0.25; done
+    if [ ! -S "$R/tmp/emu/virgl.sock" ]; then
+        tail -n 5 "$STATE/virgl.log" >&2; cmd_stop >/dev/null 2>&1 || :
+        die "the virgl server didn't start (OpenGL; its log is above)"
     fi
-    engine_loop $stock "$GL" </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
+    engine_loop $stock </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
     local fwd=""; [ "$EMU_NET" = 1 ] && fwd="--forward $CONSOLE_PORT=$NET_DECK_IP:$CONSOLE_PORT"
     # shellcheck disable=SC2086  # $fwd is two words or none
     PYTHONPATH="$ROOT" python3 -m viewer --rootfs "$R" --product "$PRODUCT" --profile "${PROFILE:-default}" \
@@ -114,8 +102,6 @@ cmd_start() {
     [ "$i" -lt 30 ] || { tail -n 20 "$STATE/viewer.log" >&2; die "the deck page isn't answering on port $VIEW_PORT"; }
     say "booting $(product_name "$PRODUCT")${PROFILE:+ (deck $PROFILE)} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
-    if [ "$GL" = 1 ]; then say "graphics: OpenGL through virgl (EMU_GL=0 for software rendering)"
-    else say "graphics: software rendering"; fi
     [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
     [ "$EMU_NET" != 1 ] || say "network: USB Ethernet on eth0, deck $NET_DECK_IP via NAT (EMU_NET=0 to turn off)"
     say "logs:    sudo ./emu.sh ${PROFILE:+--profile $PROFILE }log      stop: sudo ./emu.sh ${PROFILE:+--profile $PROFILE }stop"
@@ -155,17 +141,9 @@ cmd_status() {
 
 cmd_tap() { printf 'down %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; sleep 0.2; printf 'up %s %s\n' "$1" "$2" > "$R/tmp/emu/input"; }
 
-cmd_graphics() {
-    local v
-    case "${1:-}" in
-        auto) v=auto ;; gl|opengl) v=1 ;; software|sw) v=0 ;;
-        "") echo "${EMU_GL:-auto}"; return 0 ;;
-        *) die "usage: ./emu.sh graphics [auto|gl|software]" ;;
-    esac
-    { grep -v '^EMU_GL=' "$DATA/emu.conf" 2>/dev/null || :; echo "EMU_GL=$v"; } > "$DATA/emu.conf.tmp"
-    mv "$DATA/emu.conf.tmp" "$DATA/emu.conf"
-    say "graphics: $1 (takes effect at the next start)"
-}
+# Emulators before 1.3 could also render without OpenGL, and older apps still set this before
+# starting a deck. There's only OpenGL now, so it just says so.
+cmd_graphics() { say "graphics: OpenGL through virgl (the only renderer)"; }
 
 cmd_reset_data() {
     need_root; running && die "stop it first"

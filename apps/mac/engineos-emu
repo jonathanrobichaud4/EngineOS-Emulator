@@ -17,7 +17,7 @@
 #   engineos-emu uninstall [--yes]            delete the VM and everything in it
 #   engineos-emu state                        for the Mac app (never starts the VM): lima= and vm=
 #                                            lines, then json= with `emu.sh info --json` (docs/cli.md)
-#   engineos-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
+#   engineos-emu <anything else>              passed to emu.sh in the VM (mod-install,
 #                                            shell, info, profiles, identify, reset-data, ...)
 #
 # Files: your home folder is visible in the VM read-only, at the same path, so FIRMWARE can be

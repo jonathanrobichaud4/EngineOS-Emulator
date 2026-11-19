@@ -386,14 +386,6 @@ namespace EngineOSEmulator
             open.CheckedChanged += (s, e) => SetOption("OpenDeck", open.Checked);
             var upd = new ToolStripMenuItem("Update the emulator when the app opens") { Checked = Option("AutoUpdate", true), CheckOnClick = true };
             upd.CheckedChanged += (s, e) => SetOption("AutoUpdate", upd.Checked);
-            // OpenGL through virgl is the default; this is the way back if it misbehaves on a PC.
-            var sw = new ToolStripMenuItem("Software rendering (if the screen looks wrong)") { Checked = Option("SoftwareRender", false), CheckOnClick = true };
-            sw.CheckedChanged += async (s, e) =>
-            {
-                SetOption("SoftwareRender", sw.Checked);
-                await wsl.Run(wsl.Emu(CurrentProfile, "graphics " + (sw.Checked ? "software" : "auto")), Log);
-                Log("Restart the deck for this to take effect.");
-            };
             var updApp = new ToolStripMenuItem("Update this app automatically") { Checked = Option("AutoUpdateApp", true), CheckOnClick = true };
             updApp.CheckedChanged += (s, e) => SetOption("AutoUpdateApp", updApp.Checked);
             var stopClose = new ToolStripMenuItem("Stop the deck when this app closes") { Checked = Option("StopOnClose", true), CheckOnClick = true };
@@ -402,7 +394,6 @@ namespace EngineOSEmulator
             m.Items.Add(stopClose);
             m.Items.Add(upd);
             m.Items.Add(updApp);
-            m.Items.Add(sw);
             m.Items.Add(open);
             m.Show(anchor, new Point(0, anchor.Height));
         }

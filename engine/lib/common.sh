@@ -3,7 +3,7 @@
 #
 #   ENGINE  this folder's parent (engine/): the code that runs on the Linux side
 #   ROOT    the checkout
-#   DATA    where the decks (rootfs*/, state*/), drives.txt and emu.conf live: the checkout too
+#   DATA    where the decks (rootfs*/, state*/) and drives.txt live: the checkout too
 #           (ignored by git, so updating the code never touches them), or EMU_DATA (the tests
 #           use a scratch folder)
 #   R       the selected deck's root filesystem, STATE its runtime files
@@ -22,17 +22,7 @@ VIEW_PORT=${VIEW_PORT:-8090}
 CONSOLE_PORT=${CONSOLE_PORT:-8080}
 QEMU=/usr/bin/qemu-arm-static   # replaced by find_qemu() if the distro names it differently
 
-# Saved settings (emu.sh graphics ...); the environment still wins.
-if [ -f "$DATA/emu.conf" ]; then
-    _gl_env=${EMU_GL:-}
-    # shellcheck source=/dev/null
-    . "$DATA/emu.conf"
-    [ -z "$_gl_env" ] || EMU_GL=$_gl_env
-fi
 EMU_NET=${EMU_NET:-1}
-# Rendering: EMU_GL=1 real OpenGL through virgl (see gl_ready), 0 Qt's software renderer,
-# auto (default) GL when it's available for this firmware.
-EMU_GL=${EMU_GL:-auto}
 
 die() { echo "emu: $*" >&2; exit 1; }
 say() { echo "emu: $*"; }

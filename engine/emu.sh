@@ -18,7 +18,7 @@
 #   sudo ./emu.sh mod-install MOD.tar.gz                 install and enable a mod (while running)
 #   sudo ./emu.sh dump-qml OUTDIR [FILTER]               write Engine's built-in QML out as files
 #   sudo ./emu.sh stop | reboot | restart | status | shell | log | tap X Y | reset-data
-#   sudo ./emu.sh graphics [auto|gl|software] | identify FILE | unmount
+#   ./emu.sh identify FILE | sudo ./emu.sh unmount
 #
 # The code is split by subject in engine/lib (see docs/layout.md); this file reads the options
 # and runs the command.

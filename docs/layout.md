@@ -22,7 +22,7 @@ engine/
   lib/rootfs.sh          what the emulator adds to the firmware's files, and mounting them
   lib/net.sh             the deck's network namespace, DHCP and NAT
   lib/firmware.sh        setup from a firmware file, installing EngineX, identify
-  lib/run.sh             start, stop, the Engine loop, graphics, reset-data
+  lib/run.sh             start, stop, the Engine loop, reset-data
   lib/drives.sh          drive add / remove / rename / type / list
   lib/profiles.sh        decks: profile new / rename / delete / model, product
   lib/info.sh            info, models, version: what the apps read
@@ -31,20 +31,20 @@ engine/
   edisks_emu.py          the deck's drive service (Engine asks it to mount drives)
   shim/                  libemushim.so, preloaded into Engine (screen, input, audio, MIDI)
   firmware/              reading inMusic update images (from QEngine)
-  tools/                 helpers emu.sh runs (GL items, QML injection, QML dumps)
+  tools/                 helpers emu.sh runs (unpacking QML dumps)
 viewer/
   server.py              the HTTP server and its options (python3 -m viewer --help)
   frames.py              the touchscreen's frames; the FIFOs into Engine
   surface.py             controls to MIDI, Engine's MIDI to LEDs
   displays.py            the Prime 4's platter screens and FX OLEDs
-  audio.py waves.py drives.py forward.py
+  audio.py drives.py forward.py
   web/                   index.html, panel.css, panel.js (controls), displays.js, audio.js,
                          drives.js, main.js (starts it)
 models/
   models.py              reads the models; makes the shell, JSON, C and app versions of them
   JP21/ JC11S/ JC11/     model.json and panel.json for each model
   gen/                   the panel generators
-assets/                  copied into the deck: fake /sys, QML stand-ins, the virgl Mesa driver
+assets/                  copied into the deck: fake /sys, the virgl Mesa driver, systemctl
 apps/mac/                engineos-emu (the launcher), lima.yaml, app/ (the SwiftUI app)
 apps/windows/            src/ (the WinForms app), installer.nsi, build.sh
 mac/                     forwarders for the old mac/ paths
@@ -55,8 +55,8 @@ docs/                    these notes
 
 ## Where the decks live
 
-Decks are `rootfs[-NAME]/` and `state[-NAME]/` at the top of the checkout, next to `drives.txt`
-and `emu.conf`, as they always have been. git ignores them, so updating the code (the apps move
+Decks are `rootfs[-NAME]/` and `state[-NAME]/` at the top of the checkout, next to `drives.txt`,
+as they always have been. git ignores them, so updating the code (the apps move
 the checkout to the matching release) never touches them. `EMU_DATA=/some/folder` puts them
 somewhere else; the tests use that.
 
