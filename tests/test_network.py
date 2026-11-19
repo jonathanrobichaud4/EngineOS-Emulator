@@ -63,3 +63,92 @@ class Interfaces(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProDjLink(unittest.TestCase):
+    """--prolink: the deck's Pro DJ Link packets get this machine's address and MAC written in."""
+
+    def keepalive(self, ip, mac):
+        ka = bytearray(54)
+        ka[0:10] = linkbridge.PROLINK_MAGIC
+        ka[10] = 0x06
+        ka[0x0c:0x0c + 19] = b"EngineX Export Beta"
+        ka[0x26:0x2c] = mac
+        ka[0x2c:0x30] = socket.inet_aton(ip)
+        return bytes(ka)
+
+    def test_rewrites_ip_and_mac(self):
+        deck_mac, pc_mac = bytes.fromhex("0277000000 02".replace(" ", "")), bytes.fromhex("52f9f5784224")
+        out = linkbridge.rewrite_prolink(self.keepalive("10.77.0.2", deck_mac), "10.77.0.2", "192.168.1.20",
+                                         deck_mac, pc_mac)
+        self.assertEqual(socket.inet_ntoa(out[0x2c:0x30]), "192.168.1.20")
+        self.assertEqual(out[0x26:0x2c], pc_mac)
+        self.assertEqual(out[0x0c:0x1f], b"EngineX Export Beta")
+        self.assertEqual(len(out), 54)
+
+    def test_leaves_other_packets(self):
+        other = b"airD" + socket.inet_aton("10.77.0.2") * 4
+        self.assertEqual(linkbridge.rewrite_prolink(other, "10.77.0.2", "192.168.1.20", None, None), other)
+
+    def test_ports(self):
+        self.assertEqual(set(linkbridge.PROLINK), {50000, 50001, 50002})
+        self.assertFalse(set(linkbridge.PROLINK) & set(linkbridge.RELAY))
+
+
+class Portmap(unittest.TestCase):
+    """portmap_udp asks for everything (DUMP) and falls back to mount/NFS lookups (GETPORT), which
+    is all EngineX's portmapper answers."""
+
+    def serve(self, dump):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+        def run():
+            while True:
+                try:
+                    d, a = s.recvfrom(512)
+                except OSError:
+                    return
+                xid, _, _, prog, _, proc = struct.unpack_from(">6I", d, 0)
+                head = struct.pack(">5I", xid, 1, 0, 0, 0)
+                if proc == 4 and dump:
+                    body = struct.pack(">I", 0) + struct.pack(">5I", 1, 100005, 1, 17, 4000) + \
+                        struct.pack(">5I", 1, 100003, 3, 6, 2049) + struct.pack(">I", 0)
+                elif proc == 4:
+                    body = struct.pack(">I", 3)  # PROC_UNAVAIL
+                elif proc == 3:
+                    want, vers = struct.unpack_from(">2I", d, 40)
+                    body = struct.pack(">2I", 0, 37391 if (want, vers) in ((100005, 1), (100003, 2)) else 0)
+                else:
+                    continue
+                s.sendto(head + body, a)
+        import threading
+        threading.Thread(target=run, daemon=True).start()
+        self.addCleanup(s.close)
+        return port
+
+    def call(self, port):
+        real = linkbridge.socket.socket
+
+        class To(real):  # send portmap calls to the test server's port instead of 111
+            def sendto(self, data, addr):
+                return real.sendto(self, data, (addr[0], port))
+        linkbridge.socket.socket = To
+        try:
+            return linkbridge.portmap_udp("127.0.0.1")
+        finally:
+            linkbridge.socket.socket = real
+
+    def test_dump(self):
+        self.assertEqual(self.call(self.serve(dump=True)), {4000})
+
+    def test_getport_fallback(self):
+        self.assertEqual(self.call(self.serve(dump=False)), {37391})
+
+    def test_nobody(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        self.assertIsNone(self.call(port))

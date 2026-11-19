@@ -15,12 +15,18 @@ address. This bridge, running next to the deck as root:
     as they open and close
   - passes the network's announcements into the deck with their original source address, so
     the deck connects straight to those devices (through the NAT)
+  - with --prolink (EngineX only): Pro DJ Link too. The deck's keep-alive, beat and status packets
+    (UDP 50000-50002, sent to its own link's broadcast) go out on the network with this machine's
+    address and MAC written in, so CDJs and rekordbox see it as a player at this address; theirs
+    come in. The UDP services CDJs use to read from the deck (portmap 111 and EngineX's NFS
+    server) are forwarded to it, and its dbserver (TCP 12523 and up) goes through like any other
+    TCP port.
 
 Where "the network" is: every IPv4 interface with a broadcast address except loopback, the
 deck's own link and container bridges (on Linux, the PC's own network; in WSL with mirrored
 networking, Windows' networks; in the Mac's VM, its bridged interface). --lan names them instead.
 
-  linkbridge.py --deck-ip 10.77.0.2 --deck-if emu0 --netns enginex [--lan IF ...] [--exclude PORT ...]
+  linkbridge.py --deck-ip 10.77.0.2 --deck-if emu0 --netns enginex [--lan IF ...] [--exclude PORT ...] [--prolink]
 
 Standard library only. The protocol notes are in docs/networking.md.
 """
@@ -128,6 +134,36 @@ RELAY = {
 ANSWERED = {17891, 5353}
 MDNS_GROUP = "224.0.0.251"
 
+# Pro DJ Link (with --prolink): every packet starts with this, and devices put their own IP and
+# MAC in their keep-alives, so the deck's get this machine's written in on the way out.
+PROLINK = {
+    50000: "Pro DJ Link keep-alive",
+    50001: "Pro DJ Link beat",
+    50002: "Pro DJ Link status",
+}
+PROLINK_MAGIC = b"Qspt1WmJOL"
+
+
+def mac_of(name, netns=None):
+    """An interface's MAC address as 6 bytes, or None."""
+    cmd = (["ip", "-n", netns] if netns else ["ip"]) + ["-o", "link", "show", name]
+    try:
+        f = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout.split()
+        mac = f[f.index("link/ether") + 1]
+        return bytes.fromhex(mac.replace(":", ""))
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        return None
+
+
+def rewrite_prolink(data, old_ip, new_ip, old_mac, new_mac):
+    """The deck's Pro DJ Link packet as it should look coming from this machine."""
+    if not data.startswith(PROLINK_MAGIC):
+        return data
+    data = data.replace(socket.inet_aton(old_ip), socket.inet_aton(new_ip))
+    if old_mac and new_mac:
+        data = data.replace(old_mac, new_mac)
+    return data
+
 
 class Peers:
     """A stand-in address on the deck's own subnet for each device on the network.
@@ -199,7 +235,13 @@ class Relay:
         self.raw.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
         self.raw.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.listen = {}
-        for port in RELAY:
+        self.ports = dict(RELAY)
+        if a.prolink:
+            self.ports.update(PROLINK)
+        self.deck_bcast = self.subnet + "255"
+        self.deck_mac = mac_of("eth0", a.netns) if a.prolink else None
+        self.macs = {}
+        for port in self.ports:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -209,7 +251,7 @@ class Relay:
             try:
                 s.bind(("0.0.0.0", port))
             except OSError as e:
-                log(f"can't relay {RELAY[port]} (UDP {port}): {e.strerror}")
+                log(f"can't relay {self.ports[port]} (UDP {port}): {e.strerror}")
                 continue
             self.listen[port] = s
         self.joined = set()
@@ -225,6 +267,9 @@ class Relay:
             log("network: " + (", ".join(f"{k} {v[0]}" for k, v in sorted(lans.items())) or "none found"))
         self.lans = lans
         self.local = local_addresses()
+        if self.a.prolink:
+            self.macs = {name: mac_of(name) for name in lans}
+            self.deck_mac = self.deck_mac or mac_of("eth0", self.a.netns)
         # mDNS: listen to the group on the network and on the deck's link
         mdns = self.listen.get(5353)
         if mdns:
@@ -279,26 +324,36 @@ class Relay:
         if d:
             log(f"{what}: {d['name']} ({d['software']} {d['version']}) port {d['port']}")
         else:
-            log(f"{what} ({RELAY[port]})")
+            log(f"{what} ({self.ports[port]})")
 
     def from_deck(self, port, data, src, sport, dst):
         multicast = dst == MDNS_GROUP
-        if not multicast and dst not in ("255.255.255.255", "", None):
+        prolink = port in PROLINK
+        # Pro DJ Link goes to the deck's own link's broadcast (10.77.0.255); the rest to everyone
+        if not multicast and dst not in ("255.255.255.255", "", None) and not (prolink and dst == self.deck_bcast):
             return  # sent to this machine or its own link's broadcast: not for the network
         d = parse_discovery(data) if port == DISCOVERY_PORT else None
         self.note(port, "deck announces" if d else "deck sends", d)
-        for name, (addr, _) in list(self.lans.items()):
+        for name, (addr, brd) in list(self.lans.items()):
             out = self.reply_socket(port, sport, name, addr)
             if not out:
                 continue
+            payload, to = data, MDNS_GROUP if multicast else "255.255.255.255"
+            if prolink:
+                payload = rewrite_prolink(data, self.a.deck_ip, addr, self.deck_mac, self.macs.get(name))
+                to = brd or to   # CDJs send to their subnet's broadcast, so do the same
             try:
-                out.sendto(data, (MDNS_GROUP if multicast else "255.255.255.255", port))
+                out.sendto(payload, (to, port))
             except OSError as e:
                 self.note(port, f"can't send on {name}: {e.strerror}")
 
     def reply_socket(self, port, sport, name, addr):
         """The socket the deck's packets from `sport` go out on through `name`. Answers to it go
-        back to the deck, to that port. Ports nobody answers share one socket per interface."""
+        back to the deck, to that port. Ports nobody answers share one socket per interface.
+        Pro DJ Link goes out from its own port (devices expect 50000 from 50000), which the socket
+        listening for the network's packets already has."""
+        if port in PROLINK:
+            return self.listen.get(port)
         if port not in ANSWERED:
             sport = 0
         key = (port, sport, name)
@@ -348,17 +403,18 @@ class Relay:
 
 # ---------------------------------------------------------------------------------- TCP ports
 
-def deck_listening(netns):
-    """The TCP ports the deck listens on (not just on its loopback)."""
+def deck_listening(netns, proto="tcp"):
+    """The TCP (or UDP) ports the deck listens on (not just on its loopback)."""
     ports = set()
-    for f in ("/proc/net/tcp", "/proc/net/tcp6"):
+    state = "0A" if proto == "tcp" else "07"  # LISTEN, or an unconnected UDP socket
+    for f in (f"/proc/net/{proto}", f"/proc/net/{proto}6"):
         try:
             text = subprocess.run(["ip", "netns", "exec", netns, "cat", f], capture_output=True, text=True, timeout=5).stdout
         except (OSError, subprocess.TimeoutExpired):
             continue
         for line in text.splitlines()[1:]:
             p = line.split()
-            if len(p) < 4 or p[3] != "0A":  # LISTEN
+            if len(p) < 4 or p[3] != state:
                 continue
             addr, port = p[1].split(":")
             if addr in ("0100007F", "00000000000000000000000001000000"):  # 127.0.0.1, ::1
@@ -391,6 +447,7 @@ class Ports:
         self.subnet = a.deck_ip.rsplit(".", 1)[0] + "."  # the deck's link: never the network
         self.open = {}      # port -> listening socket
         self.failed = set()
+        self.warned = set()   # ports already reported as taken
 
     def serve(self, port, ls):
         while True:
@@ -422,15 +479,131 @@ class Ports:
                     ls.bind(("0.0.0.0", port))
                     ls.listen(16)
                 except OSError as e:
-                    log(f"deck port {port} can't be reached from the network: this machine uses it ({e.strerror})")
+                    if port not in self.warned:
+                        log(f"deck port {port} can't be reached from the network: this machine uses it ({e.strerror})")
+                        self.warned.add(port)
                     ls.close()
                     self.failed.add(port)
                     continue
                 self.open[port] = ls
                 threading.Thread(target=self.serve, args=(port, ls), daemon=True).start()
             for port in set(self.open) - want:
-                self.open.pop(port).close()
+                ls = self.open.pop(port)
+                # shutdown wakes the thread blocked in accept(); a plain close() leaves the port
+                # bound, and when the deck opens the same port again it collides with us
+                try:
+                    ls.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                ls.close()
             self.failed &= want
+            time.sleep(2)
+
+
+# What CDJs and rekordbox ask a player's portmapper for: mount and NFS, over UDP
+NFS_PROGRAMS = ((100005, 1), (100005, 3), (100003, 2), (100003, 3))
+
+
+def _rpc(host, proc, args=b"", timeout=1.0):
+    """One portmapper call (program 100000 v2); the reply after the accept header, or None."""
+    xid = (int(time.time() * 1000) + proc) & 0xFFFFFFFF
+    call = struct.pack(">10I", xid, 0, 2, 100000, 2, proc, 0, 0, 0, 0) + args
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(timeout)
+    try:
+        s.sendto(call, (host, 111))
+        data = s.recv(8192)
+    except OSError:
+        return None
+    finally:
+        s.close()
+    try:
+        rxid, mtype, stat, _flavor, vlen = struct.unpack_from(">5I", data, 0)
+        pos = 20 + ((vlen + 3) & ~3)
+        if rxid != xid or mtype != 1 or stat != 0 or struct.unpack_from(">I", data, pos)[0] != 0:
+            return None  # e.g. PROC_UNAVAIL: EngineX's portmapper has no DUMP
+        return data[pos + 4:]
+    except struct.error:
+        return None
+
+
+def portmap_udp(host, timeout=1.0):
+    """The UDP ports the portmapper at `host` hands out: everything it lists (DUMP), or, when it
+    can't list (EngineX's can't), what it answers for mount and NFS (GETPORT). None if nothing
+    answers on 111."""
+    body = _rpc(host, 4, timeout=timeout)
+    if body is not None:
+        ports, pos = set(), 0
+        try:
+            while struct.unpack_from(">I", body, pos)[0] == 1:
+                _prog, _vers, proto, port = struct.unpack_from(">4I", body, pos + 4)
+                if proto == socket.IPPROTO_UDP:
+                    ports.add(port)
+                pos += 20
+            return ports
+        except struct.error:
+            pass
+    ports, answered = set(), False
+    for prog, vers in NFS_PROGRAMS:
+        r = _rpc(host, 3, struct.pack(">4I", prog, vers, socket.IPPROTO_UDP, 0), timeout)
+        if r is None or len(r) < 4:
+            continue
+        answered = True
+        port = struct.unpack_from(">I", r, 0)[0]
+        if port:
+            ports.add(port)
+    return ports if answered else None
+
+
+class UdpServices:
+    """With --prolink: the UDP services CDJs and rekordbox use to read the deck's library
+    (portmap on 111 and the NFS ports EngineX's portmapper hands out) are forwarded from this
+    machine's address to the deck. DNAT, since NFS over UDP needs the replies
+    to come from the port that was asked. Each forwarded port also gets a placeholder socket here:
+    in WSL's mirrored networking Windows only passes on packets for ports something listens on."""
+
+    CHAIN = "EMU_LINK_IN"
+    SKIP = set(RELAY) | set(PROLINK)
+
+    def __init__(self, a):
+        self.a = a
+        self.open = {}   # port -> placeholder socket or None
+        run = Peers.run
+        self.run = lambda *args: run(self, *args)
+        if not self.run("iptables", "-t", "nat", "-N", self.CHAIN):
+            self.run("iptables", "-t", "nat", "-F", self.CHAIN)
+        for table, rule in (("nat", ["PREROUTING", "!", "-i", a.deck_if, "-m", "addrtype", "--dst-type", "LOCAL", "-j", self.CHAIN]),
+                            ("filter", ["FORWARD", "-d", a.deck_ip, "-m", "conntrack", "--ctstate", "DNAT", "-j", "ACCEPT"])):
+            if not self.run("iptables", "-t", table, "-C", *rule):
+                self.run("iptables", "-t", table, "-I", *rule)
+
+    def wanted(self):
+        listening = deck_listening(self.a.netns, "udp")
+        if 111 not in listening:
+            return set()
+        offered = portmap_udp(self.a.deck_ip) or set()
+        return {p for p in offered | {111} if p in listening and p not in self.SKIP and p not in self.a.exclude}
+
+    def run_forever(self):
+        while True:
+            want = self.wanted()
+            for port in sorted(want - set(self.open)):
+                self.run("iptables", "-t", "nat", "-A", self.CHAIN, "-p", "udp", "--dport", str(port),
+                         "-j", "DNAT", "--to-destination", f"{self.a.deck_ip}:{port}")
+                ph = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    ph.bind(("0.0.0.0", port))
+                except OSError:
+                    ph.close()
+                    ph = None
+                self.open[port] = ph
+                log(f"deck UDP port {port} reachable from the network")
+            for port in set(self.open) - want:
+                self.run("iptables", "-t", "nat", "-D", self.CHAIN, "-p", "udp", "--dport", str(port),
+                         "-j", "DNAT", "--to-destination", f"{self.a.deck_ip}:{port}")
+                ph = self.open.pop(port)
+                if ph:
+                    ph.close()
             time.sleep(2)
 
 
@@ -441,6 +614,7 @@ def main():
     ap.add_argument("--netns", default="enginex")
     ap.add_argument("--lan", nargs="*", default=[], help="the network interfaces to use (default: all but the deck's)")
     ap.add_argument("--exclude", nargs="*", type=int, default=[], help="deck ports not to open to the network")
+    ap.add_argument("--prolink", action="store_true", help="bridge Pro DJ Link too (EngineX's player export and library share)")
     a = ap.parse_args()
     a.exclude = set(a.exclude)
     if os.geteuid() != 0:
@@ -448,7 +622,9 @@ def main():
     peers = Peers(a)
     relay = Relay(a, peers)
     threading.Thread(target=Ports(a, peers).run, daemon=True).start()
-    log(f"bridging the deck ({a.deck_ip}) to the network")
+    if a.prolink:
+        threading.Thread(target=UdpServices(a).run_forever, daemon=True).start()
+    log(f"bridging the deck ({a.deck_ip}) to the network{' (with Pro DJ Link)' if a.prolink else ''}")
     relay.run()
 
 

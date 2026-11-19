@@ -13,14 +13,13 @@ Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with E
 | LEDs and meters | Engine's LED and VU meter messages light up the panel: button LEDs, RGB pads, channel and master meters, the pitch centre LED. |
 | Audio out | The deck's 8-channel output (Main, Booth, Phones). Click **Listen** to hear it; pick the output next to it. |
 | USB drives and SD card | Any folder on your PC. Engine sees it plugged in, mounts it, writes its Engine Library to it and plays from it. |
-| Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, and it can also be on your network, where other Denon gear (Engine Link), Engine DJ desktop, SoundSwitch and other StageLinQ apps see it. See [docs/networking.md](docs/networking.md). |
+| Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, and it can also be on your network, where other Denon gear (Engine Link), Engine DJ desktop, SoundSwitch and other StageLinQ apps see it. With EngineX, Pioneer gear and rekordbox see it too, through EngineX's Pro DJ Link export. See [docs/networking.md](docs/networking.md). |
 | Reboot | The **Reboot** button restarts the whole emulated deck. |
 | Graphics | Engine renders with real OpenGL, sent through virgl to your PC, so its own waveforms, beat grids, coloured icons and effects all draw. See "Graphics" below. |
 
 Not emulated yet:
 
 - Mic and aux inputs (silent), the USB audio gadget, Bluetooth and Wi-Fi. On the Prime 4 and 4+, the mic, booth and zone sections.
-- Pioneer gear (Pro DJ Link): the deck doesn't speak it, so it needs a translator, which isn't written yet.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
 
 ## Downloads

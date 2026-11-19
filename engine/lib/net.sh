@@ -22,7 +22,7 @@ dns_servers() {
 # The deck's address, or nothing when its network isn't up.
 deck_ip() {
     [ -e /run/netns/$NETNS ] || return 0
-    ip -n $NETNS -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+    ip -n $NETNS -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || :
 }
 
 net_up() {
@@ -81,6 +81,10 @@ net_down() {
     # linkbridge.py's stand-ins for the devices on the network (they go with emu0 itself)
     iptables -t nat -D PREROUTING -i $NET_HOST_IF -j EMU_LINK 2>/dev/null || :
     iptables -t nat -F EMU_LINK 2>/dev/null || :; iptables -t nat -X EMU_LINK 2>/dev/null || :
+    # and its Pro DJ Link forwards (UDP services the deck offers CDJs)
+    iptables -t nat -D PREROUTING ! -i $NET_HOST_IF -m addrtype --dst-type LOCAL -j EMU_LINK_IN 2>/dev/null || :
+    iptables -t nat -F EMU_LINK_IN 2>/dev/null || :; iptables -t nat -X EMU_LINK_IN 2>/dev/null || :
+    iptables -D FORWARD -d $NET_DECK_IP -m conntrack --ctstate DNAT -j ACCEPT 2>/dev/null || :
     [ -e /run/netns/$NETNS ] || return 0
     ip link del $NET_HOST_IF 2>/dev/null || :
     ip netns del $NETNS 2>/dev/null || :
@@ -107,9 +111,14 @@ lan_addresses() {
 }
 
 link_up() {
+    # $1 = 1 when the deck is started stock: then it's Engine as inMusic ships it, with no Pro DJ
+    # Link (that's EngineX's)
     link_on || return 0
+    local prolink=""
+    [ "${1:-0}" = 0 ] && [ -x "$R/data/enginex/bundle/bin/rb-bridge" ] && prolink=--prolink
+    # shellcheck disable=SC2086  # $prolink is one word or none
     python3 "$ENGINE/linkbridge.py" --deck-ip "$NET_DECK_IP" --deck-if "$NET_HOST_IF" --netns "$NETNS" \
-        --exclude "$CONSOLE_PORT" </dev/null > "$STATE/linkbridge.log" 2>&1 &
+        --exclude "$CONSOLE_PORT" $prolink </dev/null > "$STATE/linkbridge.log" 2>&1 &
     echo $! > "$STATE/linkbridge.pid"
 }
 

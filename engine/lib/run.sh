@@ -52,6 +52,15 @@ engine_loop() {
     done
 }
 
+# Is a process with this name running inside the deck's root?
+deck_has() {
+    local real p; real=$(readlink -f "$R")
+    for p in $(pgrep -f "$1" 2>/dev/null); do
+        [ "$(readlink "/proc/$p/root" 2>/dev/null)" = "$real" ] && return 0
+    done
+    return 1
+}
+
 cmd_start() {
     need_root
     [ -x "$R/usr/Engine/Engine" ] || die "run: sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]"
@@ -64,14 +73,23 @@ cmd_start() {
     local stock=0; [ "${1:-}" = --stock ] && stock=1
     deps; gl_ready; binfmt; prepare_rootfs >/dev/null; mounts_up
     mkdir -p "$STATE"; : > "$STATE/engine.log"
-    [ -S "$R/run/dbus/system_bus_socket" ] || in_root /usr/bin/dbus-daemon --system --fork --nopidfile
+    # the deck's D-Bus (connman needs it): a socket left by a stopped one doesn't count
+    deck_has dbus-daemon || { rm -f "$R/run/dbus/system_bus_socket"; in_root /usr/bin/dbus-daemon --system --fork --nopidfile; }
     net_up
-    link_up
+    link_up $stock
     python3 "$ENGINE/edisks_emu.py" --rootfs "$R" --drives "$DATA/drives.txt" </dev/null > "$STATE/edisks.log" 2>&1 &
     echo $! > "$STATE/edisks.pid"
     if [ $stock = 0 ] && [ -x "$R/data/enginex/bundle/bin/stream-sync" ]; then
+        # EngineX picks its Pro DJ Link interface once, when it starts: let the deck get its address
+        # first (DHCP can take a while under emulation; up to 30 s)
+        local n; for n in $(seq 1 120); do [ "$EMU_NET" != 1 ] || [ -n "$(deck_ip)" ] && break; sleep 0.25; done
         in_deck /data/enginex/bundle/bin/stream-sync --listen ":$CONSOLE_PORT" > "$STATE/stream-sync.log" 2>&1 &
         echo $! > "$STATE/stream-sync.pid"
+        # EngineX's rekordbox library and Pro DJ Link bridge (its enginex-rb-bridge service)
+        if [ -x "$R/data/enginex/bundle/bin/rb-bridge" ]; then
+            in_deck /data/enginex/bundle/bin/rb-bridge --prolink > "$STATE/rb-bridge.log" 2>&1 &
+            echo $! > "$STATE/rb-bridge.pid"
+        fi
     fi
     mkdir -p "$R/tmp/emu"; rm -f "$R/tmp/emu/virgl.sock"
     virgl_test_server --use-egl-surfaceless --socket-path "$R/tmp/emu/virgl.sock" \
@@ -113,15 +131,19 @@ cmd_start() {
 cmd_stop() {
     need_root
     local f
-    for f in emu viewer stream-sync connman udhcpd edisks virgl linkbridge; do
+    for f in emu viewer stream-sync rb-bridge connman udhcpd edisks virgl linkbridge; do
         [ -f "$STATE/$f.pid" ] && kill "$(cat "$STATE/$f.pid")" 2>/dev/null || :
         rm -f "$STATE/$f.pid"
     done
     pkill -f '/usr/Engine/Engine -d0' 2>/dev/null || :
     pkill -f 'enginex/bundle/bin/' 2>/dev/null || :
+    # started through in_deck in the background, so the saved pid is a subshell's: by command line
+    pkill -f '/etc/emu/connman.conf' 2>/dev/null || :; pkill -f '/etc/emu/udhcpd.conf' 2>/dev/null || :
+    pkill -f "$ENGINE/linkbridge.py" 2>/dev/null || :
     # Mod helper scripts started inside the chroot
+    local real; real=$(readlink -f "$R")
     for p in /proc/[0-9]*; do
-        [ "$(readlink "$p/root" 2>/dev/null)" = "$R" ] && kill "${p#/proc/}" 2>/dev/null || :
+        [ "$(readlink "$p/root" 2>/dev/null)" = "$real" ] && kill "${p#/proc/}" 2>/dev/null || :
     done
     sleep 2
     mounts_down
