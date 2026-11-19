@@ -43,6 +43,8 @@ header a{color:#8bb8ff;text-decoration:none}
 .jog .mark{position:absolute;left:50%;top:2%;width:4px;height:12%;margin-left:-2px;background:#e8eaed;border-radius:2px;transform-origin:50% 400%}
 .jog .info{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#9aa0a8;font-size:14px;font-weight:600;pointer-events:none}
 .jog.touched .top{box-shadow:inset 0 0 0 3px #4aa3ff}
+.oled{background:#000;border:1px solid #2a2d31;border-radius:3px;overflow:hidden}
+.oled canvas{width:100%;height:100%;display:block}
 .jog canvas.lcd{position:absolute;inset:18%;width:64%;height:64%;border-radius:50%;pointer-events:none}
 .sw{display:flex;border-radius:4px;overflow:hidden;border:1px solid #1d1f22;background:#1a1c1f}
 .sw div{flex:1;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:#8a9097;cursor:pointer}
@@ -214,6 +216,15 @@ const builders={
   const set=i=>{v=(i+n)%n;show();send(`${c.id} set ${v}`)};
   d.addEventListener("click",e=>set(e.shiftKey?v-1:v+1));d.addEventListener("wheel",e=>{e.preventDefault();set(v+(e.deltaY<0?1:-1))},{passive:false});
   views[c.id]={value(nv){v=nv;show()}}},
+ oled(c){const d=el(c,"oled");const cv=document.createElement("canvas");d.appendChild(cv);let last=null;
+  // area-average the 128x32 bitmap down (or up) to the canvas's real pixel size, so 1 px strokes stay visible as grey
+  const draw=()=>{if(!last)return;const r=d.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=Math.max(1,Math.round(r.width*dpr)),H=Math.max(1,Math.round(r.height*dpr));
+   if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H}const g=cv.getContext("2d"),img=g.createImageData(W,H),px=img.data,sx=128/W,sy=32/H;
+   for(let ty=0;ty<H;ty++){const y0=ty*sy,y1=y0+sy;for(let tx=0;tx<W;tx++){const x0=tx*sx,x1=x0+sx;let a=0;
+     for(let y=Math.floor(y0);y<y1&&y<32;y++){const wy=Math.min(y+1,y1)-Math.max(y,y0);for(let x=Math.floor(x0);x<x1&&x<128;x++)if(last[y*128+x])a+=wy*(Math.min(x+1,x1)-Math.max(x,x0))}
+     const v=Math.min(1,Math.sqrt(a/(sx*sy))*1.15),o=(ty*W+tx)*4;px[o]=235*v;px[o+1]=245*v;px[o+2]=255*v;px[o+3]=255}}g.putImageData(img,0,0)};
+  new ResizeObserver(draw).observe(d);
+  views[c.id]={oled(b64){const s=atob(b64),m=new Uint8Array(4096);for(let p=0;p<4;p++)for(let x=0;x<128;x++){const v=s.charCodeAt(p*128+x);for(let bit=0;bit<8;bit++)m[(p*8+bit)*128+x]=v>>bit&1}last=m;draw()}}},
  vu(c){const d=el(c,"vu");const N=c.segs||6,segs=[];for(let i=0;i<N;i++){const s=document.createElement("i");d.appendChild(s);segs.push(s)}
   const cols=segs.map((s,i)=>i>=N-1?"#ff4b3e":i>=N-2?"#ffb02e":"#2bd46a");
   // SC LIVE 4 meters light one bit per segment; Prime 4 ones (inc) send a level 0-127.
@@ -240,7 +251,7 @@ function mix(hex,a){const n=parseInt(hex.slice(1),16),r=n>>16,g=(n>>8)&255,b=n&2
 //   CC 0x31-0x34 ring quadrants top/right/left/bottom, 0x35/0x36 top/bottom box, 0x37 "DECK",
 //   0x39 "BPM", 0x3a time label, 0x3c dividing line, 0x3e BPM digits, 0x3f time digits
 //   note 0x38: the active deck number as velocity; the time and BPM come as SysEx (viewer.py).
-let jogs={},platters={};
+let jogs={},platters={},oleds={};
 const LCD_ON="#e9f1ff",LCD_DIM="#1b2027";
 // The Prime 4's jog wheel screens (MIDI devices 2 and 3; the viewer decodes them): the track's
 // artwork turning with the platter, the position ring and marker, the slip marker and the loop size.
@@ -297,6 +308,7 @@ function drawJogLcd(cv,ch,st){
 function applyLeds(){
   for(const c of P.controls){if(!c.id)continue;const v=views[c.id];if(!v)continue;
     if(c.hw){if(v.led)v.led(values[c.id]?127:0);continue}  // the emulator's own mixer controls
+    if(c.t==="oled"){const o=oleds[String(c.oled)];if(o&&o!==v.last){v.last=o;v.oled(o)}continue}
     const D=c.dev?`d${c.dev}`:"";  // which of the deck's MIDI devices (Prime 4: 1 = mixer)
     if(v.led){const key=c.t==="enc"?`${D}n${c.ch}.${c.push}`:`${D}n${c.ch}.${c.n}`;v.led(leds[key]||0)}
     if(v.cc)v.cc(leds[`${D}c${c.ch}.${c.cc}`]||0);
@@ -304,7 +316,7 @@ function applyLeds(){
     if(v.jog)v.jog(jogs[String(c.ch)])}}
 async function stateLoop(){let seq=-1,first=true;
   for(;;){try{const r=await fetch("/state?since="+seq,{cache:"no-store"});const s=await r.json();
-      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;jogs=s.jog||{};platters=s.platters||{};if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}else if(s.values)Object.assign(values,s.values);applyLeds()}}
+      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;jogs=s.jog||{};platters=s.platters||{};oleds=s.oleds||{};if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}else if(s.values)Object.assign(values,s.values);applyLeds()}}
     catch(e){await new Promise(r=>setTimeout(r,1000))}}}
 
 // ---------------------------------------------------------------- screen

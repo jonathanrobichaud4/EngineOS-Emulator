@@ -15,6 +15,7 @@ Files shared with the shim inside the chroot (<rootfs>/tmp/emu):
   audio-pcms    audio devices Engine opened; audio-select picks the pair to hear
 """
 import argparse
+import base64
 import json
 import mmap
 import os
@@ -124,6 +125,7 @@ class Surface:
         self.leds = {}
         self.jog = {}  # per MIDI channel: the jog display's time and BPM
         self.platters, self.art, self.art_up, self.platter_t = {}, {}, {}, 0  # Prime 4 jog screens
+        self.oleds = {}  # Prime 4 FX screens: index -> 512 bytes
         self.seq = 0
         self.cond = threading.Condition()
         threading.Thread(target=self.follow, daemon=True).start()
@@ -258,6 +260,9 @@ class Surface:
                     threading.Thread(target=self.replay, args=(dev,), daemon=True).start()
                 elif dev in (2, 3) and self.platter_msg(dev, b):
                     changed = True
+                elif dev == 0 and b[:7] == [0xF0, 0x00, 0x02, 0x0B, 0x7F, 0x08, 0x0B] and len(b) >= 15:
+                    self.oled_msg(b)
+                    changed = True
                 elif dev == 0 and b[0] == 0xF0 and b[1:4] == [0x00, 0x02, 0x0B] and len(b) >= 8 and b[4] < 0x10:
                     # The jog display's digits (LcdWheelDisplay.qml): F0 00 02 0B <ch> 00|01 h m s cs F7
                     # is the time (01: counting down), F0 00 02 0B <ch> 02 <6 hex nibbles> F7 the BPM x 100.
@@ -340,6 +345,21 @@ class Surface:
             return False
         return True
 
+    # Prime 4 FX screens: eight 128 x 32 OLEDs on the Controller (JC11S_Controller_Device.qml),
+    # 0-3 over FX 1's knobs, 4-7 over FX 2's. F0 00 02 0B 7F 08 0B <len, 2 x 7> <oled> <first page>
+    # <end page> <first column> <last column> <pixels> F7: pages are 8-pixel-tall rows, one byte per
+    # column (low bit on top), packed as one stream of 7-bit bytes.
+    def oled_msg(self, b):
+        i, p0, p1, x0, x1 = b[9], b[10], b[11], b[12], b[13]
+        if i > 7 or p1 <= p0 or x1 < x0 or p1 > 4 or x1 > 127:
+            return
+        w = x1 - x0 + 1
+        px = self.bits7(b[14:-1], (p1 - p0) * w)
+        buf = self.oleds.setdefault(i, bytearray(512))
+        for p in range(p0, p1):
+            row = px[(p - p0) * w:(p - p0 + 1) * w]
+            buf[p * 128 + x0:p * 128 + x0 + len(row)] = row
+
     def artwork(self, dev, slot):
         return self.art.get((dev, slot))
 
@@ -348,7 +368,8 @@ class Surface:
             self.cond.wait_for(lambda: self.seq != since, timeout)
             return {"seq": self.seq, "leds": dict(self.leds), "values": dict(self.values),
                     "jog": {k: dict(v) for k, v in self.jog.items()},
-                    "platters": {k: dict(v) for k, v in self.platters.items()}}
+                    "platters": {k: dict(v) for k, v in self.platters.items()},
+                    "oleds": {str(k): base64.b64encode(bytes(v)).decode() for k, v in self.oleds.items()}}
 
 
 # ------------------------------------------------------------------------------ audio

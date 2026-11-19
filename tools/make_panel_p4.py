@@ -111,7 +111,10 @@ deck(2, 633, 5, (2, 4))
 def fx(unit, dx, ch):
     p = f"fx{unit}_"
     def d(x): return x + dx
-    lab(f"FX {unit}", d(18), 177, 30, big=1)
+    lab(f"FX {unit}", d(18), 200, 30, big=1)
+    # the four OLEDs over the knobs (Controller OLEDs 0-3 for FX 1, 4-7 for FX 2), 128 x 32
+    for k, x in enumerate([67, 132, 200, 265]):
+        put("oled", d(x), 172, 64, 17, id=f"{p}oled{k + 1}", oled=(unit - 1) * 4 + k)
     put("enc", d(67), 200, 22, 22, id=p + "select", lab="FX SELECT", ch=ch, cc=1)
     put("knob", d(132), 200, 22, 22, id=p + "param", lab="PARAMETER", ch=ch, cc=2, d=64)
     put("knob", d(200), 200, 22, 22, id=p + "freq", lab="FREQUENCY", ch=ch, cc=3, d=64)
