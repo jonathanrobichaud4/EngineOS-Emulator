@@ -1361,7 +1361,7 @@ namespace EngineOSEmulator
             }
             foreach (var b in bundles)
             {
-                if (Get("setup", "no") != "yes") { Log("Set this deck up with a firmware .img before installing EngineX."); break; }
+                if (Get("setup", "no") != "yes") { Log("Set this deck up with its firmware file first, then drop the EngineX bundle."); break; }
                 bool wasRunning = Get("running", "no") == "yes";
                 if (wasRunning) await Emu("Stopping", "stop");
                 if (await Emu("Installing EngineX", "install " + Wsl.Q(b)) == 0) { await LoadProfiles(); Log("EngineX installed."); }

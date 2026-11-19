@@ -762,7 +762,7 @@ struct ContentView: View {
                 .disabled(!m.running || (m.state["enginex"] ?? "").isEmpty)
             Spacer()
             Menu {
-                Button("Choose firmware...") { m.choose("Choose an SC LIVE 4 firmware file") }
+                Button("Choose firmware...") { m.choose("Choose the deck's firmware file") }
                 Button("Install EngineX bundle or mod...") { m.choose("Choose an EngineX bundle or a mod (.tar.gz)") }
                 Button("Plug in a folder as a USB drive...") { m.choose("Choose a music folder", folders: true) }
                 Divider()

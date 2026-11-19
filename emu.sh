@@ -388,6 +388,9 @@ install_bundle() {
     local src=$1 tmp
     [ -e "$src" ] || die "no such bundle: $src"
     [ -d "$R/usr/Engine" ] || die "run setup first"
+    # EngineX is built from the SC LIVE 4 firmware: on a Prime 4 deck (Prime 4 firmware) it would
+    # swap that Engine for the SC LIVE 4 one.
+    [ "$PRODUCT" != JC11 ] || die "EngineX is made for the SC LIVE 4 firmware, so it can't go on a Prime 4 deck. Use it on an SC LIVE 4 (or, untested, a Prime 4+) deck."
     binfmt; mounts_up
     tmp=$R/tmp/emu-bundle; rm -rf "$tmp"; mkdir -p "$tmp"
     case "$src" in
@@ -437,12 +440,22 @@ cmd_setup() {
         say "note: $(tail -n1 "$STATE/extract.log"); trying the plain reader"
         python3 "$HERE/tools/az0x_extract.py" "$fw" "$STATE/rootfs.img" rootfs
     fi
+    # Which models this firmware runs as: Prime 4 firmware ("AZ01") as a Prime 4, SC LIVE 4
+    # firmware as an SC LIVE 4 or a Prime 4+. A deck set to a model its firmware can't run follows
+    # the firmware.
+    local want=
+    if [ "$(head -c 4 "$fw")" = AZ01 ]; then [ "$PRODUCT" = JC11 ] || want=JC11
+    elif [ "$PRODUCT" = JC11 ]; then want=JP21; fi
     rm -f "$STATE/update.img"
     say "unpacking ext4 image"
     mkdir -p "$R"
     debugfs -R "rdump / $R" "$STATE/rootfs.img" >/dev/null 2>"$STATE/debugfs.log" || die "debugfs failed, see $STATE/debugfs.log"
     rm -f "$STATE/rootfs.img"
-    [ -x "$R/usr/Engine/Engine" ] || die "no /usr/Engine/Engine in that firmware; is it an SC LIVE 4 image?"
+    [ -x "$R/usr/Engine/Engine" ] || die "no /usr/Engine/Engine in that firmware; is it an Engine OS update?"
+    if [ -n "$want" ]; then
+        say "this is $(product_name "$want") firmware, so the deck is now a $(product_name "$want") (it was set to $(product_name "$PRODUCT"))"
+        PRODUCT=$want; echo "$want" > "$STATE/product"
+    fi
     prepare_rootfs
     say "Engine OS ready in $R"
     [ -z "${2:-}" ] || install_bundle "$2"
@@ -767,7 +780,8 @@ cmd_identify() {
     [ -f "$f" ] || { echo unknown; return; }
     case "$f" in
         *.img|*.IMG)
-            if [ "$(head -c4 "$f" 2>/dev/null)" = AZ0x ]; then echo firmware; else echo enginex; fi ;;
+            # inMusic update images: "AZ0x" (SC LIVE 4 and newer), "AZ01" (Prime 4, older layout)
+            case "$(head -c4 "$f" 2>/dev/null)" in AZ0x|AZ01) echo firmware ;; *) echo enginex ;; esac ;;
         *.exe|*.EXE|*.zip|*.ZIP)  # inMusic's desktop updaters and zipped images (tools/qengine)
             case "$(head -c2 "$f" 2>/dev/null)" in MZ|PK) echo firmware ;; *) echo unknown ;; esac ;;
         *.tar.gz|*.tgz|*.TAR.GZ)
