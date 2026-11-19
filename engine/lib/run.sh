@@ -61,6 +61,24 @@ deck_has() {
     return 1
 }
 
+# The deck page's port: a page server an earlier run left behind is stopped; anything else on it
+# is named, rather than the page server dying with "Address already in use".
+free_view_port() {
+    local p who
+    for p in $(pgrep -f "python3 -m viewer .*--port $VIEW_PORT" 2>/dev/null); do
+        kill "$p" 2>/dev/null && say "stopped a deck page server left from an earlier run (pid $p)"
+    done
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        who=$(ss -Hltnp "sport = :$VIEW_PORT" 2>/dev/null | grep -o 'users:(("[^"]*",pid=[0-9]*' | head -n 1)
+        [ -z "$who" ] && return 0
+        sleep 0.3
+    done
+    who=${who#users:((\"}
+    echo "emu: port $VIEW_PORT (the deck page) is taken by ${who%%\"*} (pid ${who##*pid=})." >&2
+    echo "emu: stop that program, or start the deck on another port: sudo VIEW_PORT=8091 ./emu.sh start" >&2
+    return 1
+}
+
 cmd_start() {
     need_root
     [ -x "$R/usr/Engine/Engine" ] || die "run: sudo ./emu.sh setup FIRMWARE.img [ENGINEX_BUNDLE]"
@@ -102,6 +120,7 @@ cmd_start() {
         die "the virgl server didn't start (OpenGL; its log is above)"
     fi
     engine_loop $stock </dev/null >/dev/null 2>&1 & echo $! > "$STATE/emu.pid"
+    free_view_port || { cmd_stop >/dev/null 2>&1 || :; die "start failed"; }
     local fwd=""; [ "$EMU_NET" = 1 ] && fwd="--forward $CONSOLE_PORT=$NET_DECK_IP:$CONSOLE_PORT"
     # shellcheck disable=SC2086  # $fwd is two words or none
     PYTHONPATH="$ROOT" python3 -m viewer --rootfs "$R" --product "$PRODUCT" --profile "${PROFILE:-default}" \
@@ -118,7 +137,7 @@ cmd_start() {
         fi
         sleep 0.5
     done
-    [ "$i" -lt 30 ] || { tail -n 20 "$STATE/viewer.log" >&2; die "the deck page isn't answering on port $VIEW_PORT"; }
+    [ "$i" -lt 30 ] || { tail -n 20 "$STATE/viewer.log" >&2; cmd_stop >/dev/null 2>&1 || :; die "the deck page isn't answering on port $VIEW_PORT"; }
     say "booting $(product_name "$PRODUCT")${PROFILE:+ (deck $PROFILE)} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
     [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"

@@ -118,7 +118,7 @@ link_up() {
     [ "${1:-0}" = 0 ] && [ -x "$R/data/enginex/bundle/bin/rb-bridge" ] && prolink=--prolink
     # shellcheck disable=SC2086  # $prolink is one word or none
     python3 "$ENGINE/linkbridge.py" --deck-ip "$NET_DECK_IP" --deck-if "$NET_HOST_IF" --netns "$NETNS" \
-        --exclude "$CONSOLE_PORT" $prolink </dev/null > "$STATE/linkbridge.log" 2>&1 &
+        --exclude "$CONSOLE_PORT" "$VIEW_PORT" $prolink </dev/null > "$STATE/linkbridge.log" 2>&1 &
     echo $! > "$STATE/linkbridge.pid"
 }
 
