@@ -20,7 +20,7 @@ engine/
   lib/common.sh          paths, the selected deck, its model, helpers
   lib/host.sh            packages, qemu-arm, binfmt, whether OpenGL can be used
   lib/rootfs.sh          what the emulator adds to the firmware's files, and mounting them
-  lib/net.sh             the deck's network namespace, DHCP and NAT
+  lib/net.sh             the deck's network namespace, DHCP and NAT; `network`
   lib/firmware.sh        setup from a firmware file, installing EngineX, identify
   lib/run.sh             start, stop, the Engine loop, reset-data
   lib/drives.sh          drive add / remove / rename / type / list
@@ -28,6 +28,7 @@ engine/
   lib/info.sh            info, models, version: what the apps read
   lib/mods.sh            mod-install, dump-qml
   state.py               the JSON behind info --json, profiles --json, drive list --json
+  linkbridge.py          puts the deck on your network (docs/networking.md)
   edisks_emu.py          the deck's drive service (Engine asks it to mount drives)
   shim/                  libemushim.so, preloaded into Engine (screen, input, audio, MIDI)
   firmware/              reading inMusic update images (from QEngine)
@@ -49,7 +50,7 @@ apps/mac/                engineos-emu (the launcher), lima.yaml, app/ (the Swift
 apps/windows/            src/ (the WinForms app), installer.nsi, build.sh
 mac/                     forwarders for the old mac/ paths
 tests/                   run.sh and the Python tests
-tools/                   things only a developer runs (rebuilding the Mesa driver)
+tools/                   things only a developer runs (rebuilding the Mesa driver, a StageLinQ probe)
 docs/                    these notes
 ```
 

@@ -1,6 +1,7 @@
 {
   "code": "JC11",
   "name": "Prime 4",
+  "hostname": "PRIME4",
   "order": 3,
   "firmware": {"container": "AZ01", "name": "Prime 4", "default": true},
   "enginex": false,

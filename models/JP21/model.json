@@ -1,6 +1,7 @@
 {
   "code": "JP21",
   "name": "SC LIVE 4",
+  "hostname": "SCLIVE4",
   "order": 1,
   "firmware": {"container": "AZ0x", "name": "SC LIVE 4", "default": true},
   "enginex": true,

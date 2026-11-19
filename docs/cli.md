@@ -18,13 +18,17 @@ The selected deck (`--profile NAME`), every deck, the drives and the models, in 
   "deck_url": "http://localhost:8090/", "console_url": "http://localhost:8080/",
   "decks": [{"name": "default", "setup": true, "enginex": "5.3.0.4", "model": "JP21", "running": true}],
   "drives": [{"label": "MUSIC", "kind": "usb", "folder": "/home/me/Music", "ok": true}],
-  "models": [{"code": "JP21", "name": "SC LIVE 4", "firmware": "SC LIVE 4", "enginex": true}]
+  "models": [{"code": "JP21", "name": "SC LIVE 4", "firmware": "SC LIVE 4", "enginex": true}],
+  "network": {"mode": "lan", "name": "SCLIVE4", "addresses": ["192.168.1.20"]}
 }
 ```
 
 `engine_error` is set when Engine stopped for good: the firmware doesn't run as the deck's model,
 or OpenGL isn't working on this machine.
 `engine` is `up` while the Engine process exists, which is a while before its first screen.
+
+`network.mode` is `lan` (the deck is on this computer's networks too), `local` (internet only) or
+`off` (no networking); `addresses` are this computer's addresses there ([networking.md](networking.md)).
 
 `emu.sh profiles --json`, `emu.sh drive list --json` and `emu.sh models --json` print the
 `decks`, `drives` and `models` lists on their own.

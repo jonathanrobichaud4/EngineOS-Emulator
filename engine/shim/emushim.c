@@ -37,6 +37,30 @@ static int gl_mode(void) {
     return m;
 }
 
+/* The deck's network name (what Engine announces to other devices and Engine DJ): EMU_HOSTNAME,
+ * set by emu.sh from the model or the deck's own setting. Without it Engine would announce the
+ * PC's (or the VM's) host name. */
+#include <sys/utsname.h>
+int uname(struct utsname *u) {
+    static int (*real)(struct utsname *);
+    if (!real) real = dlsym(RTLD_NEXT, "uname");
+    int r = real(u);
+    const char *h = getenv("EMU_HOSTNAME");
+    if (r == 0 && h && *h) { strncpy(u->nodename, h, sizeof u->nodename - 1); u->nodename[sizeof u->nodename - 1] = 0; }
+    return r;
+}
+int gethostname(char *name, size_t len) {
+    static int (*real)(char *, size_t);
+    const char *h = getenv("EMU_HOSTNAME");
+    if (h && *h) {
+        if (strlen(h) + 1 > len) { errno = ENAMETOOLONG; return -1; }
+        strcpy(name, h);
+        return 0;
+    }
+    if (!real) real = dlsym(RTLD_NEXT, "gethostname");
+    return real(name, len);
+}
+
 int pthread_setaffinity_np(pthread_t t, size_t n, const cpu_set_t *s) { (void)t; (void)n; (void)s; return 0; }
 int sched_setaffinity(pid_t p, size_t n, const cpu_set_t *s) { (void)p; (void)n; (void)s; return 0; }
 int mlockall(int flags) { (void)flags; return 0; }

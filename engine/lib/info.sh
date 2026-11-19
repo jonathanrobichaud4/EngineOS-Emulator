@@ -9,7 +9,9 @@ cmd_info() {
         # Everything the apps show in one answer (docs/cli.md describes it).
         python3 "$ENGINE/state.py" --root "$ROOT" --data "$DATA" info --profile "${PROFILE:-default}" --product "$PRODUCT" \
             --rootfs "$R" --state "$STATE" --engine "$engine" --ip "$ip" \
-            --deck-url "http://localhost:$VIEW_PORT/" --console-url "http://localhost:$CONSOLE_PORT/"
+            --deck-url "http://localhost:$VIEW_PORT/" --console-url "http://localhost:$CONSOLE_PORT/" \
+            --net "$([ "$EMU_NET" != 1 ] && echo off || { link_on && echo lan || echo local; })" \
+            --net-name "$(deck_name)" --net-addresses "$(lan_addresses)"
         return
     fi
     # key=value lines, as before (older apps read these).

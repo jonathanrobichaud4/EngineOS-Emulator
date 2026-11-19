@@ -216,7 +216,12 @@ namespace EngineOSEmulator
                 string outp = await wsl.Capture(wsl.Emu(CurrentProfile, "info --json"));
                 var json = EmuJson.Parse(outp) as Dictionary<string, object>;
                 Dictionary<string, string> d;
-                if (json != null) d = EmuJson.Flat(json);
+                if (json != null)
+                {
+                    d = EmuJson.Flat(json);
+                    object n;
+                    netInfo = json.TryGetValue("network", out n) ? n as Dictionary<string, object> : null;
+                }
                 else
                 {
                     // An emulator from before 1.2: key=value lines.

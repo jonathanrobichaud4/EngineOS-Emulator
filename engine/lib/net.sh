@@ -1,6 +1,8 @@
 # shellcheck shell=bash
 # Emulated USB Ethernet: the deck lives in its own network namespace behind NAT, with the
-# firmware's own DHCP client (connman) and a DHCP server on the PC side.
+# firmware's own DHCP client (connman) and a DHCP server on the PC side. That gives it the
+# internet. linkbridge.py then puts it on your network too (Engine Link, Engine DJ, StageLinQ
+# lighting apps): see link_up and docs/networking.md.
 
 NETNS=enginex
 NET_HOST_IF=emu0
@@ -76,10 +78,62 @@ CONF
 }
 
 net_down() {
+    # linkbridge.py's stand-ins for the devices on the network (they go with emu0 itself)
+    iptables -t nat -D PREROUTING -i $NET_HOST_IF -j EMU_LINK 2>/dev/null || :
+    iptables -t nat -F EMU_LINK 2>/dev/null || :; iptables -t nat -X EMU_LINK 2>/dev/null || :
     [ -e /run/netns/$NETNS ] || return 0
     ip link del $NET_HOST_IF 2>/dev/null || :
     ip netns del $NETNS 2>/dev/null || :
     iptables -t nat -D POSTROUTING -s 10.77.0.0/24 ! -o $NET_HOST_IF -j MASQUERADE 2>/dev/null || :
     iptables -D FORWARD -i $NET_HOST_IF -j ACCEPT 2>/dev/null || :
     iptables -D FORWARD -o $NET_HOST_IF -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || :
+}
+
+# ---- on your network -------------------------------------------------------------------------
+# On by default; `emu.sh network local` keeps the deck to this computer (internet only), and
+# `emu.sh network on` puts it back. One setting for every deck ($DATA/network.conf).
+link_on() { [ "$EMU_NET" = 1 ] && ! grep -qx 'LINK=off' "$DATA/network.conf" 2>/dev/null; }
+
+# The deck's name on the network: its own (emu.sh network name) or the model's.
+deck_name() {
+    local n; n=$(cat "$STATE/network-name" 2>/dev/null || :)
+    [ -n "$n" ] || n=$(model_get "$PRODUCT" hostname)
+    printf '%s\n' "${n:-$PRODUCT}"
+}
+
+# This machine's addresses on its networks: where other devices reach the deck.
+lan_addresses() {
+    ip -4 -o addr show scope global 2>/dev/null | awk -v d="$NET_HOST_IF" '$2 != d && $2 !~ /^(docker|br-|veth|virbr|cni|flannel)/ {split($4, a, "/"); printf "%s ", a[1]}' | sed 's/ $//'
+}
+
+link_up() {
+    link_on || return 0
+    python3 "$ENGINE/linkbridge.py" --deck-ip "$NET_DECK_IP" --deck-if "$NET_HOST_IF" --netns "$NETNS" \
+        --exclude "$CONSOLE_PORT" </dev/null > "$STATE/linkbridge.log" 2>&1 &
+    echo $! > "$STATE/linkbridge.pid"
+}
+
+cmd_network() {
+    case "${1:-status}" in
+        status|"")
+            if [ "$EMU_NET" != 1 ]; then say "networking is off (EMU_NET=0)"; return; fi
+            say "deck name: $(deck_name)"
+            if link_on; then say "on your network: yes, at $(lan_addresses | tr ' ' ',')"
+            else say "on your network: no (internet only; ./emu.sh network on)"; fi
+            [ -z "$(deck_ip)" ] || say "deck's own address: $(deck_ip) (behind this computer)"
+            if [ -f "$STATE/linkbridge.log" ] && running; then grep -v '^linkbridge: bridging' "$STATE/linkbridge.log" | tail -n 12 | sed 's/^linkbridge: /  /'; fi ;;
+        on|local)
+            need_root
+            { grep -v '^LINK=' "$DATA/network.conf" 2>/dev/null || :; echo "LINK=$([ "$1" = on ] && echo on || echo off)"; } > "$DATA/network.conf.tmp"
+            mv "$DATA/network.conf.tmp" "$DATA/network.conf"
+            say "$([ "$1" = on ] && echo 'decks are visible on your network' || echo 'decks stay on this computer (internet only)')$(running && echo '; restart the deck (reboot) for it to take effect')" ;;
+        name)
+            local n=${2:-}
+            [ -n "$n" ] || { deck_name; return; }
+            case "$n" in *[!A-Za-z0-9_-]*) die "network names are letters, digits, - and _" ;; esac
+            [ ${#n} -le 32 ] || die "network names are at most 32 characters"
+            need_root; mkdir -p "$STATE"; printf '%s\n' "$n" > "$STATE/network-name"
+            say "this deck is $n on the network$(running && echo '; restart Engine (./emu.sh restart) for it to take effect')" ;;
+        *) die "usage: ./emu.sh network [status] | on | local | name [NAME]" ;;
+    esac
 }

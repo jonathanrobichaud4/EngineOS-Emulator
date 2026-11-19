@@ -13,14 +13,14 @@ Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with E
 | LEDs and meters | Engine's LED and VU meter messages light up the panel: button LEDs, RGB pads, channel and master meters, the pitch centre LED. |
 | Audio out | The deck's 8-channel output (Main, Booth, Phones). Click **Listen** to hear it; pick the output next to it. |
 | USB drives and SD card | Any folder on your PC. Engine sees it plugged in, mounts it, writes its Engine Library to it and plays from it. |
-| Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, so streaming logins, update checks and online features should work. |
+| Network | Wired, like a USB Ethernet adapter on the deck. The deck gets internet access, and it can also be on your network, where other Denon gear (Engine Link), Engine DJ desktop, SoundSwitch and other StageLinQ apps see it. See [docs/networking.md](docs/networking.md). |
 | Reboot | The **Reboot** button restarts the whole emulated deck. |
 | Graphics | Engine renders with real OpenGL, sent through virgl to your PC, so its own waveforms, beat grids, coloured icons and effects all draw. See "Graphics" below. |
 
 Not emulated yet:
 
 - Mic and aux inputs (silent), the USB audio gadget, Bluetooth and Wi-Fi. On the Prime 4 and 4+, the mic, booth and zone sections.
-- Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
+- Pioneer gear (Pro DJ Link): the deck doesn't speak it, so it needs a translator, which isn't written yet.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
 
 ## Downloads
@@ -61,7 +61,7 @@ cd engineos-emulator/apps/mac
 ```
 
 - After that, double-click **Start EngineOS Emulator.command** in Finder to start it (the first time, right-click > Open).
-- `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./engineos-emu shell`, `./engineos-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
+- `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `network on|off` (the deck on your network, see [docs/networking.md](docs/networking.md)), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./engineos-emu shell`, `./engineos-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
 - Your home folder is visible in the VM read-only, so firmware and mod files can be anywhere in it. **Drives:** Engine writes its library onto a drive, so put folders you plug in as drives in `~/EngineOSEmulator` (writable from the VM): `./engineos-emu drive add ~/EngineOSEmulator/Music`.
 - It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`apps/mac/lima.yaml` sets these).
 - On Apple Silicon the VM is ARM64 Linux. Apple's chips can't run Engine's 32-bit ARM code directly, so it still goes through qemu-arm, as on a PC.
@@ -173,6 +173,7 @@ The Mac app has a **Drives** window for the same (the Drives button, or Shift-Cm
 | `sudo ./emu.sh install <bundle>` | Installs a different EngineX bundle (`.tar.gz`, Update `.img` or folder) |
 | `sudo ./emu.sh start --stock` | Runs stock Engine without the EngineX hook |
 | `sudo ./emu.sh reset-data` | Clears Engine's settings and library so first-run starts again |
+| `./emu.sh network` / `sudo ./emu.sh network on\|local` / `network name NAME` | The deck on your network: its state, on or off (internet only), and its name there ([docs/networking.md](docs/networking.md)) |
 | `sudo EMU_NET=0 ./emu.sh start` | Runs with no network |
 | `sudo ./emu.sh mod-install MOD.tar.gz` | Uploads, enables and loads a mod (deck running) |
 | `./emu.sh info --json` / `profiles --json` / `models --json` / `identify FILE` | Machine-readable state, decks, models and file types (what the apps read; see [docs/cli.md](docs/cli.md)) |
@@ -194,7 +195,7 @@ To test a different stock firmware, run `setup` again with the other `.img`. It 
   - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (on the SC LIVE 4: Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget; each model's cards and MIDI devices come from its `model.json`); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
 - `engine/edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
 - The viewer (`viewer/`) serves the page (`viewer/web/`, drawn from the model's `panel.json`), turns panel actions into the deck's MIDI messages (`models/gen` holds the maps, taken from Engine's own assignment files), answers Engine's "report all controls" query like the hardware does, decodes the decks' own displays, and streams the audio.
-- Networking: the deck runs in its own network namespace with an `eth0`, gets an address from the firmware's own `udhcpd` on the PC side, and runs its own `connmand` (set to leave your PC's clock alone). `/proc/interrupts` and `/proc/irq` are faked inside so Engine finds its control-surface serial port.
+- Networking: the deck runs in its own network namespace with an `eth0`, gets an address from the firmware's own `udhcpd` on the PC side, and runs its own `connmand` (set to leave your PC's clock alone). `engine/linkbridge.py` puts it on your network too: it relays the deck's announcements, makes its ports reachable, and gives other devices stand-in addresses on the deck's subnet, since Engine only answers neighbours ([docs/networking.md](docs/networking.md)). `/proc/interrupts` and `/proc/irq` are faked inside so Engine finds its control-surface serial port.
 - `assets/systemctl` stands in for systemd so the console can restart Engine.
 
 ## Working on it

@@ -1,6 +1,7 @@
 {
   "code": "JC11S",
   "name": "Prime 4+",
+  "hostname": "PRIME4PLUS",
   "order": 2,
   "firmware": {"container": "AZ0x", "name": "SC LIVE 4", "default": false},
   "enginex": true,

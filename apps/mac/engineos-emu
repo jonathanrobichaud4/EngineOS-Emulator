@@ -14,6 +14,9 @@
 #   engineos-emu mod-install MOD              install and enable a mod (.tar.gz)
 #   engineos-emu update                       update the emulator (in the VM and this folder)
 #   engineos-emu vm-stop                      stop the VM itself (frees its memory)
+#   engineos-emu network [status]             is the deck on your network (Engine Link, Engine DJ,
+#   engineos-emu network on | off             SoundSwitch)? on: bridge the VM onto your Mac's
+#                                            network (asks for your password once; see below)
 #   engineos-emu uninstall [--yes]            delete the VM and everything in it
 #   engineos-emu state                        for the Mac app (never starts the VM): lima= and vm=
 #                                            lines, then json= with `emu.sh info --json` (docs/cli.md)
@@ -24,6 +27,13 @@
 # anywhere in it (Downloads is fine). A folder used as a drive has to be writable, because
 # Engine writes its library onto the drive: keep it in ~/EngineOSEmulator, which the VM can
 # write to. Files outside your home folder are copied into ~/EngineOSEmulator first.
+#
+# Your network: the deck always has the internet. To be seen by other gear and apps on your
+# network, the VM needs its own place on it: `network on` installs Lima's socket_vmnet helper
+# (Homebrew, then a copy in /opt/socket_vmnet and a sudoers file for Lima, which is why it asks
+# for your password), adds a bridged network on the interface your Mac uses for the internet,
+# and restarts the VM with it. Run it again after switching between Wi-Fi and Ethernet.
+# docs/networking.md has the details.
 #
 # Settings: ENGINEOS_VM (VM name, default engineos-emu).
 #
@@ -133,6 +143,74 @@ if [ "${1:-}" = --profile ]; then PROFILE=${2:-}; shift 2; fi
 case "$PROFILE" in default) PROFILE= ;; *[!A-Za-z0-9_-]*) die "deck names are letters, digits, - and _" ;; esac
 
 vm() { limactl shell --workdir / "$VM" "$@"; }
+
+# ---- your network (Lima's bridged networking through socket_vmnet) --------------------------
+NET_NAME=engineos                                  # our network in Lima's networks.yaml
+NET_CFG="${LIMA_HOME:-$HOME/.lima}/_config/networks.yaml"
+VMNET_BIN=/opt/socket_vmnet/bin/socket_vmnet       # Lima wants it in a root-owned place
+
+vm_bridged() { grep -q "lima: *$NET_NAME" "${LIMA_HOME:-$HOME/.lima}/$VM/lima.yaml" 2>/dev/null; }
+net_iface() { route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}'; }
+
+# networks.yaml with our bridged network on IFACE (the rest of the file as it was)
+net_config() {
+    local iface=$1 tmp
+    mkdir -p "$(dirname "$NET_CFG")"
+    # Lima writes its default file the first time it's needed.
+    [ -f "$NET_CFG" ] || limactl sudoers >/dev/null 2>&1 || :
+    [ -f "$NET_CFG" ] || printf 'paths:\n  socketVMNet: "%s"\n  varRun: /private/var/run/lima\n  sudoers: /private/etc/sudoers.d/lima\ngroup: everyone\nnetworks:\n' "$VMNET_BIN" > "$NET_CFG"
+    tmp=$(mktemp)
+    # drop an earlier engineos entry, then add ours right under "networks:"
+    awk -v n="$NET_NAME" -v i="$iface" '
+        skip && /^    / { next } { skip = 0 }
+        $0 == "  " n ":" { skip = 1; next }
+        { print }
+        $0 == "networks:" { printf "  %s:\n    mode: bridged\n    interface: %s\n", n, i }
+    ' "$NET_CFG" > "$tmp"
+    # socket_vmnet in the root-owned place
+    sed -E "s#^( *socketVMNet:).*#\1 \"$VMNET_BIN\"#" "$tmp" > "$NET_CFG"; rm -f "$tmp"
+}
+
+net_on() {
+    need_lima
+    local iface brew_bin sudoers
+    iface=$(net_iface)
+    [ -n "$iface" ] || die "your Mac doesn't seem to be on a network right now"
+    command -v brew >/dev/null 2>&1 || die "this needs Homebrew (https://brew.sh)"
+    brew list socket_vmnet >/dev/null 2>&1 || { say "installing socket_vmnet (Homebrew)"; brew install socket_vmnet || die "couldn't install socket_vmnet"; }
+    brew_bin="$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet"
+    [ -x "$brew_bin" ] || die "socket_vmnet isn't where Homebrew put it ($brew_bin)"
+    net_config "$iface"
+    sudoers=$(mktemp); limactl sudoers > "$sudoers" || die "limactl sudoers failed"
+    say "installing socket_vmnet and Lima's network permissions (your Mac asks for your password)"
+    /usr/bin/osascript -e "do shell script \"mkdir -p /opt/socket_vmnet/bin && install -m 755 '$brew_bin' '$VMNET_BIN' && install -o root -m 440 '$sudoers' /private/etc/sudoers.d/lima\" with administrator privileges" >/dev/null ||
+        { rm -f "$sudoers"; die "not installed (the password prompt was cancelled?)"; }
+    rm -f "$sudoers"
+    if ! vm_bridged; then
+        [ -n "$(vm_status)" ] || die "install the VM first (engineos-emu install)"
+        say "restarting the VM on your network ($iface)"
+        [ "$(vm_status)" != Running ] || { emu stop >/dev/null 2>&1; limactl stop "$VM" >/dev/null 2>&1 || limactl stop -f "$VM" >/dev/null 2>&1; }
+        limactl edit --tty=false --set ".networks = [{\"lima\": \"$NET_NAME\"}]" "$VM" >/dev/null || die "couldn't change the VM's network (limactl edit)"
+        start_vm
+    elif [ "$(vm_status)" = Running ]; then
+        say "restarting the VM so it uses $iface"
+        emu stop >/dev/null 2>&1; limactl stop "$VM" >/dev/null 2>&1 || limactl stop -f "$VM" >/dev/null 2>&1
+        start_vm
+    fi
+    emu network on >/dev/null
+    say "the VM is on your network through $iface; start the deck and it shows up on it"
+}
+
+net_off() {
+    need_lima
+    emu network local >/dev/null 2>&1 || :
+    vm_bridged || { say "the VM isn't on your network"; return 0; }
+    say "taking the VM off your network (restarts it)"
+    [ "$(vm_status)" != Running ] || { emu stop >/dev/null 2>&1; limactl stop "$VM" >/dev/null 2>&1 || limactl stop -f "$VM" >/dev/null 2>&1; }
+    limactl edit --tty=false --set 'del(.networks)' "$VM" >/dev/null || die "couldn't change the VM's network (limactl edit)"
+    start_vm
+    say "done: the deck has the internet but isn't seen on your network"
+}
 emu() { if [ -n "$PROFILE" ]; then vm sudo sh -c "$EMU_SH" emu --profile "$PROFILE" "$@"; else vm sudo sh -c "$EMU_SH" emu "$@"; fi; }
 
 # A path the VM can see: anything in the home folder as is, anything else copied into ~/EngineOSEmulator.
@@ -213,6 +291,17 @@ update)
         after=\$(git describe --tags --always)
         if [ \"\$before\" = \"\$after\" ]; then echo \"up to date (\$after)\"; else echo \"updated \$before -> \$after\"; fi"
     ;;
+network)
+    case "${1:-status}" in
+        on) net_on ;;
+        off) net_off ;;
+        status)
+            if vm_bridged; then say "VM: bridged onto your network ($(awk -v n="  $NET_NAME:" '$0 == n {f=1; next} f && /interface:/ {print $2; exit}' "$NET_CFG" 2>/dev/null))"
+            else say "VM: internet only (engineos-emu network on to put it on your network)"; fi
+            [ "$(vm_status)" != Running ] || emu network ;;
+        *) emu network "$@" ;;
+    esac
+    ;;
 vm-stop)
     need_lima
     if [ "$(vm_status)" = Running ]; then
@@ -232,6 +321,7 @@ uninstall)
 state)
     command -v limactl >/dev/null 2>&1 || { echo "lima=missing"; command -v brew >/dev/null 2>&1 && echo brew=yes || echo brew=no; exit 0; }
     echo "lima=yes"
+    vm_bridged && echo bridged=yes || echo bridged=no
     st=$(vm_status); echo "vm=${st:-none}"
     [ "$st" = Running ] || exit 0
     # Everything about the decks in one answer.
@@ -258,7 +348,7 @@ state)
     esac
     exit 0
     ;;
-help|-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+help|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
 *)
     need_vm
     emu "$cmd" "$@"

@@ -36,6 +36,9 @@ struct EmuState {
     var values: [String: String] = [:]
     var decks: [DeckInfo] = []
     var drives: [DriveInfo] = []
+    /// The deck on the network: "lan" (seen there), "local" (internet only) or "off", its name
+    /// there and this computer's addresses on it (emu.sh info --json "network").
+    var network: (mode: String, name: String, addresses: [String])?
     /// True once the emulator answered (the VM is up), so the deck and drive lists are real.
     var fromEmulator = false
 
@@ -70,6 +73,9 @@ struct EmuState {
             decks.append(DeckInfo(name: d["name"] as? String ?? "default", setUp: d["setup"] as? Bool ?? false,
                                   enginex: d["enginex"] as? String ?? "", running: d["running"] as? Bool ?? false,
                                   model: d["model"] as? String ?? "JP21"))
+        }
+        if let n = o["network"] as? [String: Any] {
+            network = (n["mode"] as? String ?? "local", n["name"] as? String ?? "", n["addresses"] as? [String] ?? [])
         }
         for d in o["drives"] as? [[String: Any]] ?? [] {
             drives.append(DriveInfo(label: d["label"] as? String ?? "", kind: d["kind"] as? String ?? "usb",

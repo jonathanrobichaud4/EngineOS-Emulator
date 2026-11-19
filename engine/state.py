@@ -76,7 +76,8 @@ def main():
     ap.add_argument("--data", help="where the decks and drives.txt are (default: the checkout)")
     ap.add_argument("what", choices=["profiles", "drives", "info"])
     ap.add_argument("--json", action="store_true")
-    for k in ("profile", "product", "rootfs", "state", "engine", "ip", "deck-url", "console-url"):
+    for k in ("profile", "product", "rootfs", "state", "engine", "ip", "deck-url", "console-url",
+              "net", "net-name", "net-addresses"):
         ap.add_argument("--" + k, default="")
     a = ap.parse_args()
     data = a.data or a.root
@@ -114,6 +115,8 @@ def main():
         "decks": decks(data, codes),
         "drives": drives(data),
         "models": model_db.public(models),
+        # off: no networking; local: internet only; lan: also on this computer's networks
+        "network": {"mode": a.net or "local", "name": a.net_name, "addresses": a.net_addresses.split()},
     }))
 
 

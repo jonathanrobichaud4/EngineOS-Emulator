@@ -15,6 +15,8 @@
 #                                                        (sudo EMU_NET=0 ./emu.sh start: no network)
 #   sudo ./emu.sh drive add FOLDER [--sd] [--label NAME]  plug a folder in as a USB drive / SD card
 #   sudo ./emu.sh drive remove LABEL | rename LABEL NEW | type LABEL usb|sd | list [--json]
+#   ./emu.sh network [status] | sudo ./emu.sh network on|local | network name [NAME]
+#                                                        the deck on your network (docs/networking.md)
 #   sudo ./emu.sh mod-install MOD.tar.gz                 install and enable a mod (while running)
 #   sudo ./emu.sh dump-qml OUTDIR [FILTER]               write Engine's built-in QML out as files
 #   sudo ./emu.sh stop | reboot | restart | status | shell | log | tap X Y | reset-data
@@ -73,7 +75,8 @@ case "${1:-}" in
     product) shift; cmd_product "$@" ;;
     identify) shift; cmd_identify "$@" ;;
     graphics) shift; cmd_graphics "$@" ;;
+    network) shift; cmd_network "$@" ;;
     mod-install) shift; cmd_mod_install "$@" ;;
     reset-data) cmd_reset_data ;;
-    *) sed -n '2,21p' "$ENGINE/emu.sh" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,23p' "$ENGINE/emu.sh" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

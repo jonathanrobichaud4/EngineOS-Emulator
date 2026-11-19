@@ -60,6 +60,19 @@ class Decks(unittest.TestCase):
         emu("drive", "type", "TUNES", "sd", data=self.d)
         self.assertEqual(json.loads(emu("info", "--json", data=self.d))["drives"][0]["kind"], "sd")
 
+    def test_network(self):
+        emu("profile", "new", "p4", "JC11S", data=self.d)
+        self.assertEqual(emu("--profile", "p4", "network", "name", data=self.d).strip(), "PRIME4PLUS")  # the model's
+        emu("--profile", "p4", "network", "name", "BOOTH-LEFT", data=self.d)
+        info = json.loads(emu("--profile", "p4", "info", "--json", data=self.d))
+        self.assertEqual((info["network"]["name"], info["network"]["mode"]), ("BOOTH-LEFT", "lan"))
+        emu("network", "local", data=self.d)
+        self.assertEqual(json.loads(emu("info", "--json", data=self.d))["network"]["mode"], "local")
+        emu("network", "on", data=self.d)
+        self.assertEqual(json.loads(emu("info", "--json", data=self.d))["network"]["mode"], "lan")
+        with self.assertRaises(AssertionError):
+            emu("--profile", "p4", "network", "name", "has space", data=self.d)
+
     def test_identify(self):
         def make(name, data):
             p = os.path.join(self.d, name)

@@ -86,6 +86,7 @@ def shell(models):
         boards = [d for d in m["midi"]["devices"] if d.get("usb_pid")]
         lines += [
             f"model_{c}_name={q(m['name'])}",
+            f"model_{c}_hostname={q(m.get('hostname', c))}",
             f"model_{c}_container={q(m['firmware']['container'])}",
             f"model_{c}_default={'1' if m['firmware'].get('default') else ''}",
             f"model_{c}_enginex={'1' if m.get('enginex') else ''}",

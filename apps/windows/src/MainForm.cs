@@ -390,6 +390,10 @@ namespace EngineOSEmulator
             updApp.CheckedChanged += (s, e) => SetOption("AutoUpdateApp", updApp.Checked);
             var stopClose = new ToolStripMenuItem("Stop the deck when this app closes") { Checked = Option("StopOnClose", true), CheckOnClick = true };
             stopClose.CheckedChanged += (s, e) => SetOption("StopOnClose", stopClose.Checked);
+            var net = new ToolStripMenuItem(NetworkMenuText()) { Checked = WslNetwork.Mirrored && (netInfo == null || EmuJson.Str(netInfo, "mode") == "lan") };
+            net.Click += async (s, e) => await SetOnNetwork(!net.Checked);
+            m.Items.Add(net);
+            m.Items.Add(new ToolStripSeparator());
             m.Items.Add(auto);
             m.Items.Add(stopClose);
             m.Items.Add(upd);

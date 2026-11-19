@@ -17,6 +17,7 @@ Each model is a folder in `models/` named by inMusic's product code, holding `mo
 {
   "code": "JC11S",                 // product code: the folder's name, written to the devicetree
   "name": "Prime 4+",              // what people see
+  "hostname": "PRIME4PLUS",        // the deck's default name on the network (emu.sh network name)
   "order": 2,                      // place in lists; the first model is the default for new decks
   "firmware": {
     "container": "AZ0x",           // the update image's format: AZ0x (SC LIVE 4 and newer), AZ01 (Prime 4)

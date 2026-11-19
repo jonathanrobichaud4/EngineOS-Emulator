@@ -25,6 +25,7 @@ final class Model: ObservableObject {
     }
     @Published var decks: [DeckInfo] = []
     @Published var drives: [DriveInfo] = []
+    @Published var network: (mode: String, name: String, addresses: [String])?
 
     private var current: Process?
     private var follower: Process?
@@ -108,6 +109,7 @@ final class Model: ObservableObject {
                 if s.values["vm"] == "Running" && s.fromEmulator {
                     self.decks = s.decks
                     self.drives = s.drives
+                    self.network = s.network
                     if !s.decks.isEmpty && !s.decks.contains(where: { $0.name == self.deck }) { self.deck = s.decks[0].name }
                 }
             }
@@ -137,7 +139,7 @@ final class Model: ObservableObject {
     /// Runs `engineos-emu [--profile DECK] args...`, streaming its output into the log. One at a time.
     /// Commands about the VM or the app itself don't take a deck.
     func run(_ args: [String], title: String, profile: String? = nil, done: ((Int32) -> Void)? = nil) {
-        let vmWide: Set<String> = ["install", "update", "vm-stop", "uninstall", "profile"]
+        let vmWide: Set<String> = ["install", "update", "vm-stop", "uninstall", "profile", "network"]
         var pre = profileArgs
         if let p = profile { pre = p == "default" ? [] : ["--profile", p] }
         let full = (args.first.map { vmWide.contains($0) } ?? false) ? args : pre + args
@@ -211,6 +213,24 @@ final class Model: ObservableObject {
     func reboot() { run(["reboot"], title: "Rebooting the deck") }
     func update() { run(["update"], title: "Updating the emulator") }
     func stopVM() { run(["vm-stop"], title: "Stopping the VM") }
+
+    // MARK: your network (docs/networking.md)
+
+    /// The VM is bridged onto the Mac's network (engineos-emu network on).
+    var onNetwork: Bool { state["bridged"] == "yes" }
+
+    var networkNote: String {
+        if !onNetwork {
+            return "Lets Denon gear, Engine DJ, SoundSwitch and lighting apps on your network see the deck. The first time, it installs a small helper and asks for your password; the VM restarts."
+        }
+        guard let n = network, running else { return "On your network. Start the deck and it shows up there." }
+        if n.mode != "lan" { return "The VM is on your network, but this deck is set to stay on this computer." }
+        return "Seen as \(n.name)" + (n.addresses.isEmpty ? "" : " at " + n.addresses.joined(separator: ", "))
+    }
+
+    func setOnNetwork(_ on: Bool) {
+        run(["network", on ? "on" : "off"], title: on ? "Putting the deck on your network" : "Taking the deck off your network")
+    }
 
     func uninstall() {
         let a = NSAlert()

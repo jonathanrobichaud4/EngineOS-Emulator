@@ -122,6 +122,20 @@ namespace EngineOSEmulator
             return "";
         }
 
+        // Stops WSL entirely (needed after changing .wslconfig).
+        public static Task Shutdown()
+        {
+            return Task.Run(() =>
+            {
+                try
+                {
+                    using (var p = Process.Start(new ProcessStartInfo(WslExe, "--shutdown") { UseShellExecute = false, CreateNoWindow = true }))
+                        p.WaitForExit(60000);
+                }
+                catch { }
+            });
+        }
+
         public Process KeepAlive()
         {
             // WSL can stop a distro once no wsl.exe is attached; this keeps it up while the deck runs.

@@ -22,7 +22,7 @@ engine_loop() {
         n=$((n + 1)); t0=$(date +%s)
         echo "=== Engine start #$n $(date '+%F %T') preload=$preload" >> "$STATE/engine.log"
         # shellcheck disable=SC2086  # $render is a list of VAR=value words
-        in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} LD_PRELOAD="$preload" $render \
+        in_deck EMU_DEBUG=${EMU_DEBUG:-0} EMU_QML_FIND=${EMU_QML_FIND:-} EMU_HOSTNAME="$(deck_name)" LD_PRELOAD="$preload" $render \
             MALLOC_ARENA_MAX=1 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
             /usr/Engine/Engine -d0 -skipFirmwareUpdate -loggerOptions "Type, Message, Thread, Category, SplitLongLines" \
             >> "$STATE/engine.log" 2>&1 || :
@@ -66,6 +66,7 @@ cmd_start() {
     mkdir -p "$STATE"; : > "$STATE/engine.log"
     [ -S "$R/run/dbus/system_bus_socket" ] || in_root /usr/bin/dbus-daemon --system --fork --nopidfile
     net_up
+    link_up
     python3 "$ENGINE/edisks_emu.py" --rootfs "$R" --drives "$DATA/drives.txt" </dev/null > "$STATE/edisks.log" 2>&1 &
     echo $! > "$STATE/edisks.pid"
     if [ $stock = 0 ] && [ -x "$R/data/enginex/bundle/bin/stream-sync" ]; then
@@ -103,14 +104,16 @@ cmd_start() {
     say "booting $(product_name "$PRODUCT")${PROFILE:+ (deck $PROFILE)} (first screen takes 1-2 minutes under emulation)"
     say "deck:    http://localhost:$VIEW_PORT/  (screen, controls, audio, drives)"
     [ $stock = 1 ] || [ ! -x "$R/data/enginex/bundle/bin/stream-sync" ] || say "EngineX console: http://localhost:$CONSOLE_PORT/"
-    [ "$EMU_NET" != 1 ] || say "network: USB Ethernet on eth0, deck $NET_DECK_IP via NAT (EMU_NET=0 to turn off)"
+    if [ "$EMU_NET" != 1 ]; then say "network: off (EMU_NET=0)"
+    elif link_on; then say "network: on your network as $(deck_name) at $(lan_addresses | tr ' ' ',') (./emu.sh network local to keep it to this computer)"
+    else say "network: internet only, not visible on your network (./emu.sh network on)"; fi
     say "logs:    sudo ./emu.sh ${PROFILE:+--profile $PROFILE }log      stop: sudo ./emu.sh ${PROFILE:+--profile $PROFILE }stop"
 }
 
 cmd_stop() {
     need_root
     local f
-    for f in emu viewer stream-sync connman udhcpd edisks virgl; do
+    for f in emu viewer stream-sync connman udhcpd edisks virgl linkbridge; do
         [ -f "$STATE/$f.pid" ] && kill "$(cat "$STATE/$f.pid")" 2>/dev/null || :
         rm -f "$STATE/$f.pid"
     done

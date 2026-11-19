@@ -20,6 +20,11 @@ struct SettingsView: View {
             Toggle("Update the emulator when the app opens", isOn: $m.autoUpdate)
             Toggle("Update this app automatically", isOn: $m.autoUpdateApp)
             Toggle("Stop the deck and the VM when the app quits", isOn: $m.stopOnQuit)
+            Divider()
+            Toggle("Put the deck on my network", isOn: Binding(get: { m.onNetwork }, set: { m.setOnNetwork($0) }))
+                .disabled(m.busy || m.state["lima"] != "yes")
+            Text(m.networkNote).foregroundStyle(.secondary).font(.caption).fixedSize(horizontal: false, vertical: true)
+            Divider()
             HStack {
                 Button("Check for app updates now") { m.checkAppUpdate(manual: true) }
                 Text(BuildInfo.version == "dev" ? "Test build \(BuildInfo.commit.prefix(7))" : "Version \(BuildInfo.version) (\(BuildInfo.commit.prefix(7)))")
