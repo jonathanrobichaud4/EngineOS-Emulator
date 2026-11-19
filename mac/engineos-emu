@@ -17,6 +17,7 @@
 #   engineos-emu uninstall [--yes]            delete the VM and everything in it
 #   engineos-emu state                        key=value lines for the Mac app (never starts the VM),
 #                                            with deck=NAME<TAB>set up<TAB>EngineX<TAB>running<TAB>model lines
+#                                            and drive=LABEL<TAB>usb|sd<TAB>folder lines
 #   engineos-emu <anything else>              passed to emu.sh in the VM (graphics, mod-install,
 #                                            shell, info, profiles, identify, reset-data, ...)
 #
@@ -247,7 +248,9 @@ state)
             [ -x "rootfs$x/usr/Engine/Engine" ] && set=yes
             [ -f "state$x/emu.pid" ] && kill -0 "$(cat "state$x/emu.pid")" 2>/dev/null && run=yes
             printf "deck=%s\t%s\t%s\t%s\t%s\n" "$n" "$set" "$(head -n1 "rootfs$x/data/enginex/version.txt" 2>/dev/null)" "$run" "$model"
-        done' 2>/dev/null
+        done
+        # plugged-in drives (shared by every deck): drive=LABEL<TAB>usb|sd<TAB>folder
+        [ ! -f drives.txt ] || sed -n "s/^\(.\)/drive=\1/p" drives.txt' 2>/dev/null
     exit 0
     ;;
 help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;

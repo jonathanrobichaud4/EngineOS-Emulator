@@ -72,6 +72,14 @@ struct DeckInfo: Hashable {
     var label: String { "\(name) (\(DeckModel.name(model)), \(what))" + (running ? ", running" : "") }
 }
 
+/// A folder plugged into the emulated decks (drives.txt; every deck shares them).
+struct DriveInfo: Hashable {
+    var label: String
+    var kind: String   // "usb" or "sd"
+    var folder: String
+    var kindName: String { kind == "sd" ? "SD card" : "USB drive" }
+}
+
 /// The deck models the emulator knows, by inMusic product code. Only the SC LIVE 4 boots so far.
 struct DeckModel: Hashable {
     let code: String, name: String, ready: Bool
@@ -105,6 +113,7 @@ final class Model: ObservableObject {
         didSet { UserDefaults.standard.set(deck, forKey: "deck"); state = [:]; refresh() }
     }
     @Published var decks: [DeckInfo] = []
+    @Published var drives: [DriveInfo] = []
 
     private var current: Process?
     private var follower: Process?
@@ -182,8 +191,12 @@ final class Model: ObservableObject {
             let data = out.fileHandleForReading.readDataToEndOfFile()
             var s: [String: String] = [:]
             var ds: [DeckInfo] = []
+            var drv: [DriveInfo] = []
             for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-                if line.hasPrefix("deck=") {
+                if line.hasPrefix("drive=") {
+                    let f = line.dropFirst(6).split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+                    if f.count >= 3 { drv.append(DriveInfo(label: f[0], kind: f[1], folder: f[2])) }
+                } else if line.hasPrefix("deck=") {
                     let f = line.dropFirst(5).split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
                     if f.count >= 4 {
                         ds.append(DeckInfo(name: f[0], setUp: f[1] == "yes", enginex: f[2], running: f[3] == "yes",
@@ -199,6 +212,7 @@ final class Model: ObservableObject {
                 // gone (renamed or deleted elsewhere), select the first one there is.
                 if s["vm"] == "Running" && s["profile"] != nil {
                     self.decks = ds
+                    self.drives = drv
                     if !ds.isEmpty && !ds.contains(where: { $0.name == self.deck }) { self.deck = ds[0].name }
                 }
             }
@@ -287,6 +301,52 @@ final class Model: ObservableObject {
             return
         }
         startSelected()
+    }
+
+    // MARK: managing drives (emu.sh drive add / remove / rename / type)
+
+    func removeDrive(_ d: DriveInfo) {
+        let a = NSAlert()
+        a.messageText = "Unplug \(d.label)?"
+        a.informativeText = "The deck stops seeing it. The folder and its music stay where they are: \(d.folder)"
+        a.addButton(withTitle: "Unplug")
+        a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        run(["drive", "remove", d.label], title: "Unplugging \(d.label)") { _ in self.refresh() }
+    }
+
+    func renameDrive(_ d: DriveInfo) {
+        let a = NSAlert()
+        a.messageText = "Rename \(d.label)"
+        a.informativeText = "The name the deck shows: up to 11 letters, digits, - and _, like a real USB stick."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.stringValue = d.label
+        a.accessoryView = field
+        a.addButton(withTitle: "Rename")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = field
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard name != d.label else { return }
+        guard name.count <= 11, name.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil else {
+            alert("Drive names are up to 11 letters, digits, - and _."); return
+        }
+        guard !drives.contains(where: { $0.label == name }) else { alert("There's already a drive called \(name)."); return }
+        run(["drive", "rename", d.label, name], title: "Renaming \(d.label) to \(name)") { _ in self.refresh() }
+    }
+
+    func setDriveType(_ d: DriveInfo, _ kind: String) {
+        guard kind != d.kind else { return }
+        if kind == "sd", let other = drives.first(where: { $0.kind == "sd" && $0.label != d.label }) {
+            alert("The deck has one SD card slot, and \(other.label) is in it. Make that one a USB drive first."); return
+        }
+        run(["drive", "type", d.label, kind], title: kind == "sd" ? "Putting \(d.label) in the SD slot" : "Making \(d.label) a USB drive") { _ in self.refresh() }
+    }
+
+    func revealDrive(_ d: DriveInfo) {
+        let url = URL(fileURLWithPath: d.folder)
+        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        else { alert("\(d.folder) isn't there any more (moved or deleted?). Unplug the drive and plug the folder in again.") }
     }
 
     // MARK: managing decks (emu.sh profile new / rename / delete / model)
@@ -689,6 +749,7 @@ struct ContentView: View {
     @EnvironmentObject var m: Model
     @State private var dropping = false
     @State private var showDecks = false
+    @State private var showDrives = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -704,6 +765,8 @@ struct ContentView: View {
         .padding(16)
         .onAppear { m.launch() }
         .sheet(isPresented: $showDecks) { DecksView().environmentObject(m) }
+        .sheet(isPresented: $showDrives) { DrivesView().environmentObject(m) }
+        .onReceive(NotificationCenter.default.publisher(for: .manageDrives)) { _ in showDrives = true }
         .onReceive(NotificationCenter.default.publisher(for: .manageDecks)) { _ in showDecks = true }
     }
 
@@ -760,6 +823,8 @@ struct ContentView: View {
                 .disabled(!m.running)
             Button { NSWorkspace.shared.open(m.consoleURL) } label: { Label("EngineX console", systemImage: "slider.horizontal.3") }
                 .disabled(!m.running || (m.state["enginex"] ?? "").isEmpty)
+            Button { showDrives = true } label: { Label(m.drives.isEmpty ? "Drives" : "Drives (\(m.drives.count))", systemImage: "externaldrive") }
+                .help("The folders plugged into the deck as USB drives or an SD card")
             Spacer()
             Menu {
                 Button("Choose firmware...") { m.choose("Choose the deck's firmware file") }
@@ -824,7 +889,70 @@ struct ContentView: View {
     }
 }
 
-extension Notification.Name { static let manageDecks = Notification.Name("manageDecks") }
+extension Notification.Name {
+    static let manageDecks = Notification.Name("manageDecks")
+    static let manageDrives = Notification.Name("manageDrives")
+}
+
+/// The folders plugged into the decks: add, unplug, rename, USB or SD card, show in Finder.
+struct DrivesView: View {
+    @EnvironmentObject var m: Model
+    @Environment(\.dismiss) var dismiss
+    @State private var picked: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Drives").font(.title3.bold())
+            Text("Folders on your Mac plugged into the deck as USB drives (or one SD card). Every deck sees the same ones. Engine keeps its library on a drive, so drives inside \(m.share.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) work best; others are read-only.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            List(selection: $picked) {
+                ForEach(m.drives, id: \.label) { d in
+                    HStack(spacing: 10) {
+                        Image(systemName: d.kind == "sd" ? "sdcard" : "externaldrive").frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(d.label).bold()
+                            Text(d.folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer()
+                        Picker("", selection: Binding(get: { d.kind }, set: { m.setDriveType(d, $0) })) {
+                            Text("USB drive").tag("usb")
+                            Text("SD card").tag("sd")
+                        }
+                        .labelsHidden().frame(width: 120).disabled(m.busy)
+                    }
+                    .tag(d.label)
+                    .contextMenu {
+                        Button("Show in Finder") { m.revealDrive(d) }
+                        Button("Rename...") { m.renameDrive(d) }
+                        Button("Unplug") { m.removeDrive(d) }
+                    }
+                }
+            }
+            .frame(minHeight: 160)
+            .overlay {
+                if m.drives.isEmpty {
+                    Text("No drives plugged in. Add a music folder, or drop one on the main window.").foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Button("Add Folder...") { m.choose("Choose a music folder", folders: true) }
+                Button("Rename...") { if let d = sel { m.renameDrive(d) } }.disabled(sel == nil)
+                Button("Unplug") { if let d = sel { m.removeDrive(d) } }.disabled(sel == nil)
+                Button("Show in Finder") { if let d = sel { m.revealDrive(d) } }.disabled(sel == nil)
+                Spacer()
+                if m.busy { ProgressView().controlSize(.small); Text(m.task).foregroundStyle(.secondary).lineLimit(1) }
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .disabled(m.busy)
+        }
+        .padding(16)
+        .frame(width: 600, height: 380)
+        .onAppear { m.refresh() }
+    }
+
+    private var sel: DriveInfo? { m.drives.first { $0.label == picked } }
+}
 
 /// Add, rename and delete decks, and pick each one's model.
 struct DecksView: View {
@@ -942,6 +1070,8 @@ struct EngineOSEmulatorApp: App {
             CommandMenu("Deck") {
                 Button("Manage Decks...") { NotificationCenter.default.post(name: .manageDecks, object: nil) }
                     .keyboardShortcut("k").disabled(model.busy)
+                Button("Manage Drives...") { NotificationCenter.default.post(name: .manageDrives, object: nil) }
+                    .keyboardShortcut("d", modifiers: [.command, .shift]).disabled(model.busy)
                 Divider()
                 Button("Start") { model.start() }.keyboardShortcut("r").disabled(model.busy || !model.isSetUp || model.running)
                 Button("Stop") { model.stop() }.keyboardShortcut(".").disabled(model.busy || !model.running)

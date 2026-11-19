@@ -154,9 +154,11 @@ sudo ./emu.sh drive add /mnt/c/Users/<you>/Music --label MUSIC      # as a USB d
 sudo ./emu.sh drive add /mnt/d/DJ --sd --label DJ                     # as the SD card
 sudo ./emu.sh drive list
 sudo ./emu.sh drive remove MUSIC
+sudo ./emu.sh drive rename DJ GIGS                                    # the name the deck shows (up to 11 characters)
+sudo ./emu.sh drive type GIGS usb                                     # move it between a USB port and the SD slot
 ```
 
-Drives stay attached across restarts. Engine writes its `Engine Library` folder into the folder, like it would on a real drive, so use a copy or a folder you don't mind it writing to. A Windows folder (`/mnt/c/...`) works but is slower than a folder inside Ubuntu.
+The Mac app has a **Drives** window for the same (the Drives button, or Shift-Cmd-D), and the Windows app's drives list unplugs them. Drives stay attached across restarts. Engine writes its `Engine Library` folder into the folder, like it would on a real drive, so use a copy or a folder you don't mind it writing to. A Windows folder (`/mnt/c/...`) works but is slower than a folder inside Ubuntu.
 
 ### Other commands
 

@@ -634,10 +634,28 @@ cmd_drive() {
             grep -q "^$label	" "$f" || die "no drive called $label"
             grep -v "^$label	" "$f" > "$f.tmp" || :; mv "$f.tmp" "$f"
             say "removed $label" ;;
+        rename)
+            # the name the deck shows for the drive
+            local old=${2:-} new=${3:-}
+            [ -n "$old" ] && [ -n "$new" ] || die "usage: ./emu.sh drive rename LABEL NEWLABEL"
+            case "$new" in */*|.*|*[!A-Za-z0-9_-]*) die "drive names are letters, digits, - and _" ;; esac
+            [ ${#new} -le 11 ] || die "drive names are at most 11 characters (like a real USB stick)"
+            grep -q "^$old	" "$f" || die "no drive called $old"
+            [ "$old" = "$new" ] || ! grep -q "^$new	" "$f" || die "a drive called $new is already attached"
+            awk -F'\t' -v o="$old" -v n="$new" 'BEGIN{OFS="\t"} $1==o{$1=n} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            say "renamed $old to $new" ;;
+        type)
+            # plugged into a USB port or the SD card slot (there's one)
+            local label=${2:-} kind=${3:-}
+            case "$kind" in usb|sd) ;; *) die "usage: ./emu.sh drive type LABEL usb|sd" ;; esac
+            grep -q "^$label	" "$f" || die "no drive called $label"
+            [ "$kind" != sd ] || ! grep -v "^$label	" "$f" | grep -q "	sd	" || die "the deck has one SD slot and it's in use"
+            awk -F'\t' -v l="$label" -v k="$kind" 'BEGIN{OFS="\t"} $1==l{$2=k} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            say "$label is now $([ "$kind" = sd ] && echo 'in the SD slot' || echo 'a USB drive')" ;;
         list|"")
             [ -s "$f" ] || { say "no drives attached (./emu.sh drive add FOLDER [--sd] [--label NAME])"; return; }
             awk -F'\t' '{printf "  %-12s %-4s %s\n", $1, $2, $3}' "$f" ;;
-        *) die "usage: ./emu.sh drive add FOLDER [--sd] [--label NAME] | remove LABEL | list" ;;
+        *) die "usage: ./emu.sh drive add FOLDER [--sd] [--label NAME] | remove LABEL | rename LABEL NEW | type LABEL usb|sd | list" ;;
     esac
 }
 
