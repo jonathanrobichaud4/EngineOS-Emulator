@@ -182,6 +182,27 @@ block_telemetry() {
     done
 }
 
+# The Prime 4's four internal boards are USB MIDI devices, sound cards 0-3 in the order the shim
+# gives them (Controller, Mixer, Left Display, Right Display). Engine binds the displays by USB
+# product ID as well as by their identity reply (KnownDevices: Left 9008, Right b008), reading it
+# from the device behind /sys/class/sound/cardN/device, so each card gets a USB device here.
+usb_boards() {
+    local i name pid hub=/sys/devices/platform/ff500000.usb/usb1/1-1
+    rm -rf "$R/sys/class/sound" "$R$hub"; mkdir -p "$R/sys/class/sound"
+    for i in 0 1 2 3; do
+        name=$(echo "Controller Mixer Left_Display Right_Display" | cut -d' ' -f$((i + 1)) | tr _ ' ')
+        pid=$(echo "9001 9002 9008 b008" | cut -d' ' -f$((i + 1)))
+        local dev=$hub/1-1.$((i + 1)) intf=$hub/1-1.$((i + 1))/1-1.$((i + 1)):1.0
+        mkdir -p "$R$intf/sound/card$i"
+        printf '15e4\n' > "$R$dev/idVendor"; printf '%s\n' "$pid" > "$R$dev/idProduct"
+        printf '%s\n' "$name" > "$R$dev/product"; printf 'inMusic\n' > "$R$dev/manufacturer"
+        printf '1\n' > "$R$dev/busnum"; printf '%s\n' $((i + 2)) > "$R$dev/devnum"; printf '1.%s\n' $((i + 1)) > "$R$dev/devpath"
+        printf 'Surface%s\n' "$([ $i = 0 ] || echo $i)" > "$R$intf/sound/card$i/id"; printf '%s\n' $i > "$R$intf/sound/card$i/number"
+        ln -sfn "../../devices/platform/ff500000.usb/usb1/1-1/1-1.$((i + 1))/1-1.$((i + 1)):1.0/sound/card$i" "$R/sys/class/sound/card$i"
+        ln -sfn "../../../1-1.$((i + 1)):1.0" "$R$intf/sound/card$i/device"
+    done
+}
+
 prepare_rootfs() {
     mkdir -p "$R/etc/emu" "$R/usr/bin"
     rm -rf "$R/sys" && tar -C "$R" -xzf "$HERE/files/fakesys.tar.gz"
@@ -199,6 +220,7 @@ prepare_rootfs() {
         { printf %s "$PRODUCT"; head -c $((128 - ${#PRODUCT})) /dev/zero; } > "$ef/ffb10000.efuse/rockchip-efuse0/nvmem"
         { head -c 7 /dev/zero; printf %s "RK3288AZ01$PRODUCT"; head -c $((128 - 17 - ${#PRODUCT})) /dev/zero; } \
             > "$ef/ffb40000.efuse/rockchip-efuse0/nvmem"
+        usb_boards
     fi
     # Both names, so it works whichever path the kernel's binfmt entry was registered with.
     cp "$QEMU" "$R/usr/bin/qemu-arm-static"
@@ -303,6 +325,9 @@ dns_servers() {
 
 net_up() {
     [ "$EMU_NET" = 1 ] || return 0
+    # A namespace left over from before a restart (of WSL, the VM or the computer) is just a
+    # dead file; clear it so it can be made again.
+    if [ -e /run/netns/$NETNS ] && ! ip netns exec $NETNS true 2>/dev/null; then ip netns del $NETNS 2>/dev/null || rm -f /run/netns/$NETNS; fi
     [ -e /run/netns/$NETNS ] || ip netns add $NETNS
     if ! ip link show $NET_HOST_IF >/dev/null 2>&1; then
         ip link add $NET_HOST_IF type veth peer name eth0 netns $NETNS

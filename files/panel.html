@@ -199,7 +199,7 @@ const builders={
       touching=Math.hypot(dx,dy)<r.width*0.34;if(touching){d.classList.add("touched");send(c.id+" press")}},
     ()=>{if(touching){touching=false;d.classList.remove("touched");send(c.id+" release")}});
   d.addEventListener("wheel",e=>{e.preventDefault();const n=e.deltaY<0?24:-24;pos+=n;show();send(`${c.id} spin ${n}`)},{passive:false});
-  views[c.id]={jog(st){const on=drawJogLcd(lcd,c.ch,st);info.style.display=on?"none":"flex"}}},
+  views[c.id]={jog(st){const on=c.platter?drawPlatter(lcd,c.platter,platters[c.platter]):drawJogLcd(lcd,c.ch,st);info.style.display=on?"none":"flex"}}},
  sw(c){const d=el(c,"sw");label(d,c.labs?"":c.lab);
   const parts=c.labs.map((t,i)=>{const p=document.createElement("div");p.textContent=t;p.onclick=()=>{set(i)};d.appendChild(p);return p});
   let v=values[c.id]??c.d??0;const show=()=>parts.forEach((p,i)=>p.classList.toggle("on",i===v));show();
@@ -240,8 +240,27 @@ function mix(hex,a){const n=parseInt(hex.slice(1),16),r=n>>16,g=(n>>8)&255,b=n&2
 //   CC 0x31-0x34 ring quadrants top/right/left/bottom, 0x35/0x36 top/bottom box, 0x37 "DECK",
 //   0x39 "BPM", 0x3a time label, 0x3c dividing line, 0x3e BPM digits, 0x3f time digits
 //   note 0x38: the active deck number as velocity; the time and BPM come as SysEx (viewer.py).
-let jogs={};
+let jogs={},platters={};
 const LCD_ON="#e9f1ff",LCD_DIM="#1b2027";
+// The Prime 4's jog wheel screens (MIDI devices 2 and 3; the viewer decodes them): the track's
+// artwork turning with the platter, the position ring and marker, the slip marker and the loop size.
+const artCache={};
+function artImg(dev,slot,ver){const k=`${dev}/${slot}`;const c=artCache[k];if(c&&c.ver===ver)return c.img.complete&&c.img.naturalWidth?c.img:null;
+  const img=new Image();img.onload=()=>applyLeds();img.src=`/platter-art?dev=${dev}&slot=${slot}&v=${ver}`;artCache[k]={ver,img};return null}
+function drawPlatter(cv,dev,st){const g=cv.getContext("2d"),W=cv.width,R=W/2;g.clearRect(0,0,W,W);if(!st)return false;
+  const sh=st.show||[0,0,0,13],col=e=>{const c=(st.colors||{})[e];return c?`rgba(${c[1]},${c[2]},${c[3]},${(c[0]/255).toFixed(3)})`:null};
+  g.save();g.globalAlpha=Math.max(0.15,(st.bright??127)/127);g.beginPath();g.arc(R,R,R,0,2*Math.PI);g.fillStyle="#000";g.fill();g.clip();
+  const turn=a=>a*2*Math.PI;
+  if(sh[0]&1){const ver=(st.art||{})[String(sh[2])];const img=ver&&artImg(dev,sh[2],ver);
+    if(img){g.save();g.translate(R,R);g.rotate(turn(st.angle||0)+Math.PI);g.globalAlpha*=((st.colors||{})["0"]||[255])[0]/255;g.drawImage(img,-R,-R,W,W);g.restore()}}
+  if(sh[0]&2){const c=col(1)||"#fff";g.strokeStyle=c;g.lineWidth=W*0.02;g.beginPath();g.arc(R,R,R*0.3,0,2*Math.PI);g.stroke()}
+  if(sh[0]&16){const c=col(4);if(c){g.fillStyle=c;g.fillRect(0,0,W,W)}}
+  if(sh[0]&4){const ring=col(2),mk=col(3)||"#fff",a=turn(st.angle||0)-Math.PI/2;
+    if(ring){g.strokeStyle=ring;g.lineWidth=W*0.05;g.beginPath();g.arc(R,R,R*0.95,0,2*Math.PI);g.stroke()}
+    g.strokeStyle=mk;g.lineWidth=W*0.06;g.lineCap="round";g.beginPath();g.moveTo(R+Math.cos(a)*R*0.72,R+Math.sin(a)*R*0.72);g.lineTo(R+Math.cos(a)*R*0.94,R+Math.sin(a)*R*0.94);g.stroke()}
+  if(sh[0]&16){const c=col(5)||"#fff",a=turn(st.slip||0)-Math.PI/2;g.fillStyle=c;g.beginPath();g.arc(R+Math.cos(a)*R*0.83,R+Math.sin(a)*R*0.83,W*0.035,0,2*Math.PI);g.fill()}
+  if(sh[1]&2&&st.loop){g.fillStyle=col(8)||"#fff";g.font=`bold ${Math.round(W*0.2)}px system-ui,sans-serif`;g.textAlign="center";g.textBaseline="middle";g.fillText(st.loop,R,R)}
+  g.restore();return true}
 function drawJogLcd(cv,ch,st){
   const L=k=>leds[`c${ch}.${k}`]||0,g=cv.getContext("2d"),W=cv.width,R=W/2;
   const needle=L(0x30),any=needle||L(0x31)||L(0x35)||L(0x37)||L(0x3e)||L(0x3f);
@@ -285,7 +304,7 @@ function applyLeds(){
     if(v.jog)v.jog(jogs[String(c.ch)])}}
 async function stateLoop(){let seq=-1,first=true;
   for(;;){try{const r=await fetch("/state?since="+seq,{cache:"no-store"});const s=await r.json();
-      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;jogs=s.jog||{};if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}else if(s.values)Object.assign(values,s.values);applyLeds()}}
+      if(s.seq!==seq||first){seq=s.seq;leds=s.leds;jogs=s.jog||{};platters=s.platters||{};if(first){values=s.values;for(const[k,v]of Object.entries(values))views[k]?.value?.(v);first=false}else if(s.values)Object.assign(values,s.values);applyLeds()}}
     catch(e){await new Promise(r=>setTimeout(r,1000))}}}
 
 // ---------------------------------------------------------------- screen

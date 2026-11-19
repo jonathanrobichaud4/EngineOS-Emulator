@@ -74,7 +74,8 @@ def deck(side, dx, ch, decks):
     put("btn", d(32), 374, 18, 18, id=f"deck{decks[0]}", lab=str(decks[0]), ch=G, n=27 + decks[0], round=1)
     put("btn", d(32), 400, 18, 18, id=f"deck{decks[1]}", lab=str(decks[1]), ch=G, n=27 + decks[1], round=1)
     lab("DECK", d(32), 387, 30)
-    put("jog", d(167), 387, 205, 205, id=p + "jog", lab=f"DECK {decks[0]}/{decks[1]}", ch=ch, cc=0x37, cc2=0x4D, touch=33)
+    # platter: the jog wheel's screen is MIDI device 2 (left) or 3 (right); the page draws it
+    put("jog", d(167), 387, 205, 205, id=p + "jog", lab=f"DECK {decks[0]}/{decks[1]}", ch=ch, cc=0x37, cc2=0x4D, touch=33, platter=1 + side)
     put("pitch", d(300), 385, 16, 150, id=p + "pitch", lab="TEMPO", ch=ch, cc=0x1F, cc2=0x4B, led=42)
     lab("TRACK SKIP", d(45), 447, 60)
     put("btn", d(32), 459, 16, 14, id=p + "prev", lab="⏮", ch=ch, n=4, round=1)

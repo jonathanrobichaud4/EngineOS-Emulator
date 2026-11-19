@@ -123,6 +123,7 @@ class Surface:
                 self.values[c["id"]] = 0
         self.leds = {}
         self.jog = {}  # per MIDI channel: the jog display's time and BPM
+        self.platters, self.art, self.art_up, self.platter_t = {}, {}, {}, 0  # Prime 4 jog screens
         self.seq = 0
         self.cond = threading.Condition()
         threading.Thread(target=self.follow, daemon=True).start()
@@ -223,6 +224,7 @@ class Surface:
                 with self.cond:
                     self.leds.clear()
                     self.jog.clear()
+                    self.platters.clear()
             if st.st_size == pos:
                 time.sleep(0.03)
                 continue
@@ -254,6 +256,8 @@ class Surface:
                 elif b[0] == 0xF0 and b[1:5] == [0x00, 0x02, 0x0B, 0x7F] and len(b) >= 7 and b[6] == 0x04:
                     # "report every control's position", F0 00 02 0B 7F <family> 04 F7
                     threading.Thread(target=self.replay, args=(dev,), daemon=True).start()
+                elif dev in (2, 3) and self.platter_msg(dev, b):
+                    changed = True
                 elif dev == 0 and b[0] == 0xF0 and b[1:4] == [0x00, 0x02, 0x0B] and len(b) >= 8 and b[4] < 0x10:
                     # The jog display's digits (LcdWheelDisplay.qml): F0 00 02 0B <ch> 00|01 h m s cs F7
                     # is the time (01: counting down), F0 00 02 0B <ch> 02 <6 hex nibbles> F7 the BPM x 100.
@@ -269,11 +273,82 @@ class Surface:
                     self.seq += 1
                     self.cond.notify_all()
 
+    # ---------------------------------------------------------------- Prime 4 platter screens
+    # MIDI devices 2 and 3 are the left and right jog wheel screens (JC11S_Display_Device.qml and
+    # _Assignments.qml): pitch bend on channel 1 / 2 is the platter / slip position (a fraction of
+    # a turn); F0 00 02 0B <id> 08 <cmd> ... F7 sets the rest:
+    #   0B 00 09 <element> <A R G B as nibble pairs>   element colour (0 artwork alpha, 1 logo,
+    #       2 ring, 3 position, 4 slip overlay, 5 slip position, 8 loop text, 10 jump, 11 loop icon)
+    #   0A 00 04 <s0> <s1> <artwork slot> <loop text>  what's shown: s0 bit 0 artwork, 1 logo,
+    #       2 position, 4 slip; s1 bit 1 loop text, 3 jump icon, 4 loop icon
+    #   7C 00 01 <brightness>
+    #   0C 00 03 <size, 3 x 7 bits>, 0D <len, 2 x 7> <offset, 3 x 7> <data>..., 0E 00 09 <slot> ...
+    #       an artwork upload: a 198 x 198 PNG, as one bit stream of 7-bit bytes in 3500-byte chunks
+    LOOP_TEXT = {0: "1/64", 1: "1/32", 2: "1/16", 3: "1/8", 4: "1/4", 5: "1/2", 6: "1", 7: "2", 0x10: "3",
+                 8: "4", 0x11: "6", 9: "8", 0x12: "9", 10: "16", 11: "32", 12: "64", 14: "A", 15: "B"}
+
+    @staticmethod
+    def bits7(vals, nbytes):
+        acc = n = 0
+        out = bytearray()
+        for v in vals:
+            acc, n = (acc << 7) | (v & 0x7F), n + 7
+            while n >= 8 and len(out) < nbytes:
+                n -= 8
+                out.append((acc >> n) & 0xFF)
+            acc &= (1 << n) - 1
+        return bytes(out)
+
+    def platter_msg(self, dev, b):
+        """One message for platter screen `dev`; True if the page should hear about it."""
+        p = self.platters.setdefault(str(dev), {"angle": 0, "slip": 0, "colors": {}, "show": [0, 0, 0, 13], "bright": 127, "art": {}})
+        if b[0] in (0xE0, 0xE1) and len(b) >= 3:
+            p["angle" if b[0] == 0xE0 else "slip"] = ((b[2] << 7) | b[1]) / 16384
+            now = time.time()
+            if now - self.platter_t < 0.05:  # ~80 a second; the page gets at most ~20
+                return False
+            self.platter_t = now
+            return True
+        if b[0] != 0xF0 or b[1:4] != [0x00, 0x02, 0x0B] or len(b) < 8 or b[5] != 0x08:
+            return False
+        cmd, d = b[6], b[7:-1]
+        if cmd == 0x0B and len(d) >= 11:
+            e = d[2]
+            n = d[3:11]
+            p["colors"][str(e)] = [(n[i] << 4 | n[i + 1]) for i in range(0, 8, 2)]
+        elif cmd == 0x0A and len(d) >= 6:
+            p["show"] = d[2:6]
+            p["loop"] = self.LOOP_TEXT.get(d[5], "")
+        elif cmd == 0x7C and len(d) >= 3:
+            p["bright"] = d[2]
+        elif cmd == 0x0C and len(d) >= 5:
+            self.art_up[dev] = [(d[2] << 14) | (d[3] << 7) | d[4], bytearray()]
+            return False
+        elif cmd == 0x0D and len(d) >= 5 and dev in self.art_up:
+            total, buf = self.art_up[dev]
+            off = (d[2] << 14) | (d[3] << 7) | d[4]
+            chunk = self.bits7(d[5:], min(3500, total - off))
+            buf[off:off + len(chunk)] = chunk
+            return False
+        elif cmd == 0x0E and len(d) >= 3 and dev in self.art_up:
+            total, buf = self.art_up.pop(dev)
+            slot = d[2]
+            if len(buf) == total and buf[:4] == b"\x89PNG":
+                self.art[(dev, slot)] = bytes(buf)
+                p["art"][str(slot)] = p["art"].get(str(slot), 0) + 1  # a version, for the page's cache
+        else:
+            return False
+        return True
+
+    def artwork(self, dev, slot):
+        return self.art.get((dev, slot))
+
     def state(self, since, timeout=2.0):
         with self.cond:
             self.cond.wait_for(lambda: self.seq != since, timeout)
             return {"seq": self.seq, "leds": dict(self.leds), "values": dict(self.values),
-                    "jog": {k: dict(v) for k, v in self.jog.items()}}
+                    "jog": {k: dict(v) for k, v in self.jog.items()},
+                    "platters": {k: dict(v) for k, v in self.platters.items()}}
 
 
 # ------------------------------------------------------------------------------ audio
@@ -614,6 +689,10 @@ def main():
                 self.json(surface.state(int(self.q("since"))))
             elif p == "/audio":
                 self.reply(200, audio.get(int(self.q("pos"))))
+            elif p == "/platter-art":
+                # a Prime 4 jog screen's artwork: ?dev=2|3&slot=N (the PNG Engine sent it)
+                png = surface.artwork(int(self.q("dev")), int(self.q("slot")))
+                self.reply(200, png, "image/png") if png else self.reply(404)
             elif p == "/audio-devices":
                 self.json(audio.devices())
             elif p == "/drives":

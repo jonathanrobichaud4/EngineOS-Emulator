@@ -65,7 +65,7 @@ static double now_s(void) {
  *     and binds an assignment file by the reply (KnownDevices.vfsb): "7E ?? 06 02 00 02 0B
  *     <family> ..." plus, on the Prime 4, a last byte telling Controller (00), Mixer (20),
  *     Left Display (10) and Right Display (30) apart. */
-struct fdev { int client; const char *name; unsigned char tail; };
+struct fdev { int client; const char *name; unsigned char tail; unsigned short pid; };
 struct fproduct {
     const char *code, *card_name, *pcm_name; int out_ch, in_ch;
     unsigned char family; int ndev; struct fdev devs[4];
@@ -75,9 +75,11 @@ static const struct fproduct g_products[] = {
     {"JP21", "JP21", "JP21 PCM inmusic,jp21-audio-codec-0", 8, 2, 0x12, 1, {{16, "Control Surface", 0}}},
     /* Prime 4 and Prime 4+: four USB MIDI devices inside the unit. */
     {"JC11", "PRIME 4 Audio", "PRIME 4 Audio PCM", 0, 0, 0x08, 4,
-     {{20, "PRIME 4 Controller", 0x00}, {24, "PRIME 4 Mixer", 0x20}, {28, "PRIME 4 Left Display", 0x10}, {32, "PRIME 4 Right Display", 0x30}}},
+     {{20, "PRIME 4 Controller", 0x00, 0x9001}, {24, "PRIME 4 Mixer", 0x20, 0x9002},
+      {28, "PRIME 4 Left Display", 0x10, 0x9008}, {32, "PRIME 4 Right Display", 0x30, 0xb008}}},
     {"JC11S", "PRIME 4 Audio", "PRIME 4 Audio PCM", 0, 0, 0x08, 4,
-     {{20, "PRIME 4+ Controller", 0x00}, {24, "PRIME 4+ Mixer", 0x20}, {28, "PRIME 4+ Left Display", 0x10}, {32, "PRIME 4+ Right Display", 0x30}}},
+     {{20, "PRIME 4+ Controller", 0x00, 0x9001}, {24, "PRIME 4+ Mixer", 0x20, 0x9002},
+      {28, "PRIME 4+ Left Display", 0x10, 0x9008}, {32, "PRIME 4+ Right Display", 0x30, 0xb008}}},
 };
 static const struct fproduct *product(void) {
     static const struct fproduct *p;
@@ -102,7 +104,7 @@ struct fcard { const char *id, *name, *components; int midi; int pcm_play, pcm_c
 #define MAXCARDS 8
 static struct fcard g_cards[MAXCARDS];
 static int NCARDS_, AUDIO_CARD, UAC_CARD;
-static char g_card_ids[4][16];
+static char g_card_ids[4][16], g_card_comp[4][24];
 static void cards_init(void) {
     static int done;
     if (done) return;
@@ -111,7 +113,10 @@ static void cards_init(void) {
     int n = 0;
     for (int i = 0; i < p->ndev; i++) {
         snprintf(g_card_ids[i], sizeof g_card_ids[i], i ? "Surface%d" : "Surface", i);
-        g_cards[n++] = (struct fcard){g_card_ids[i], p->devs[i].name, "", 1, 0, 0};
+        /* A USB card's components name its USB IDs; Engine binds the Prime 4 displays by product
+         * ID (KnownDevices: Left 9008, Right b008). inMusic's vendor ID is 15e4. */
+        if (p->devs[i].pid) snprintf(g_card_comp[i], sizeof g_card_comp[i], "USB15e4:%04x", p->devs[i].pid);
+        g_cards[n++] = (struct fcard){g_card_ids[i], p->devs[i].name, g_card_comp[i], 1, 0, 0};
     }
     AUDIO_CARD = n;
     g_cards[n++] = (struct fcard){p->code, p->card_name, "", 0, 1, 1};

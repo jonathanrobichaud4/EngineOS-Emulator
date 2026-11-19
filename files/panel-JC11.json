@@ -235,7 +235,8 @@
 "ch": 4,
 "cc": 55,
 "cc2": 77,
-"touch": 33
+"touch": 33,
+"platter": 2
 },
 {
 "t": "pitch",
@@ -713,7 +714,8 @@
 "ch": 5,
 "cc": 55,
 "cc2": 77,
-"touch": 33
+"touch": 33,
+"platter": 3
 },
 {
 "t": "pitch",
