@@ -26,14 +26,17 @@ jobs:
             echo "::error::v$v is already released; bump VERSION"; exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
-  mac:
+  tests:
     needs: version
+    uses: ./.github/workflows/tests.yml
+  mac:
+    needs: [version, tests]
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build"
+      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} apps/mac/app/build.sh "$PWD/build"
       - name: Zip (what the app updates itself from)
         run: |
           ditto -c -k --keepParent "build/EngineOS Emulator.app" EngineOSEmulator-mac.zip
@@ -57,21 +60,21 @@ jobs:
             EngineOSEmulator-mac.zip
             EngineOSEmulator-mac.dmg
   windows:
-    needs: version
+    needs: [version, tests]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel nsis >/dev/null
-      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} windows/build.sh
-      - run: makensis -V2 -DVERSION="$VERSION" windows/installer.nsi
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel libmono-system-web-extensions4.0-cil nsis >/dev/null
+      - run: BUILD_VERSION=$VERSION BUILD_COMMIT=${{ github.sha }} apps/windows/build.sh
+      - run: makensis -V2 -DVERSION="$VERSION" apps/windows/installer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: windows
           path: |
-            windows/EngineOSEmulator.exe
-            windows/EngineOSEmulator-Setup.exe
+            apps/windows/EngineOSEmulator.exe
+            apps/windows/EngineOSEmulator-Setup.exe
   publish:
     needs: [version, mac, windows]
     runs-on: ubuntu-latest

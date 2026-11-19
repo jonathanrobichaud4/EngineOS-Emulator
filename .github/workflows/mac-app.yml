@@ -4,7 +4,7 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ["mac/**", ".github/workflows/mac-app.yml"]
+    paths: ["apps/mac/**", "models/**", ".github/workflows/mac-app.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,10 +17,10 @@ jobs:
         shell: bash
         run: |
           # Compiler errors become annotations, readable without logging in.
-          if ! BUILD_COMMIT=${{ github.sha }} mac/app/build.sh "$PWD/build" > build.log 2>&1; then
+          if ! BUILD_COMMIT=${{ github.sha }} apps/mac/app/build.sh "$PWD/build" > build.log 2>&1; then
             cat build.log
             grep -E '^[^ ]+:[0-9]+:[0-9]+: error: ' build.log | head -30 |
-              sed -E 's/^([^:]+):([0-9]+):([0-9]+): error: (.*)$/::error file=\1,line=\2,col=\3::\4/' || true
+              sed -E 's#^(/[^:]*/)?(Sources/[^:]+):([0-9]+):([0-9]+): error: (.*)$#::error file=apps/mac/app/\2,line=\3,col=\4::\5#' || true
             echo "::error::build failed: $(grep -m1 -E 'error' build.log | cut -c1-300)"
             exit 1
           fi

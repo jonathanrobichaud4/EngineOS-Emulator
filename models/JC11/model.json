@@ -1,0 +1,20 @@
+{
+  "code": "JC11",
+  "name": "Prime 4",
+  "order": 3,
+  "firmware": {"container": "AZ01", "name": "Prime 4", "default": true},
+  "enginex": false,
+  "efuse": true,
+  "audio": {"card": "PRIME 4 Audio", "pcm": "PRIME 4 Audio PCM", "out_channels": 0, "in_channels": 0,
+            "outputs": ["Main", "Booth", "Phones", "Zone"]},
+  "midi": {
+    "family": 8,
+    "devices": [
+      {"name": "PRIME 4 Controller", "board": "Controller", "client": 20, "tail": 0, "usb_pid": "9001"},
+      {"name": "PRIME 4 Mixer", "board": "Mixer", "client": 24, "tail": 32, "usb_pid": "9002"},
+      {"name": "PRIME 4 Left Display", "board": "Left Display", "client": 28, "tail": 16, "usb_pid": "9008"},
+      {"name": "PRIME 4 Right Display", "board": "Right Display", "client": 32, "tail": 48, "usb_pid": "b008"}
+    ]
+  },
+  "notes": "Four USB MIDI boards inside the unit. Engine binds the displays by USB product ID as well as by their identity reply."
+}

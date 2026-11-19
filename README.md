@@ -19,7 +19,7 @@ Runs the real Engine binary from the stock SC LIVE 4 firmware on your PC, with E
 
 Not emulated yet:
 
-- Mic and aux inputs (silent), the USB audio gadget, Bluetooth, Wi-Fi, and the jog wheel displays.
+- Mic and aux inputs (silent), the USB audio gadget, Bluetooth and Wi-Fi. On the Prime 4 and 4+, the mic, booth and zone sections.
 - Other devices on your LAN can't see the emulated deck (it's behind NAT), so no Pro DJ Link, StageLinQ or phone QR logins that need the same network.
 - Speed. Engine is ARM code running on an x86 CPU through qemu, so it boots in 1 to 2 minutes and the UI is slower than the real deck. Audio plays in real time.
 
@@ -40,7 +40,7 @@ The apps update themselves to newer releases (an option in their settings) and k
 - **Drop files on it:** a firmware `.img` sets up the selected deck, an EngineX bundle installs EngineX, a mod `.tar.gz` installs and enables the mod, a folder plugs in as a USB drive (hold Shift for the SD card), and music files are copied to `Music\EngineOS Emulator`, which is plugged in as the EMULATOR drive.
 - Start, Stop, Reboot, Open deck and EngineX console buttons, a deck picker and a **Decks...** window to add, rename and delete decks and choose each one's model (for example a stock Engine OS deck next to the EngineX one), the drives list, and **More...** for the Engine log, resetting a deck and updating the emulator.
 
-Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `windows/build.sh` (Mono's C# compiler), then `makensis windows/installer.nsi` for the installer.
+Windows may warn the first time ("Windows protected your PC") because the program isn't signed: click More info, then Run anyway. To build it yourself: `apps/windows/build.sh` (Mono's C# compiler), then `makensis apps/windows/installer.nsi` for the installer.
 
 Installed copies from before the rename to EngineOS Emulator update into the new app and keep their decks, settings and drives: the old folders (`Music\SC LIVE 4 Emulator`, `~/SCLive4Emulator`, `/opt/sclive4-emulator`) move to the new names the next time the deck is stopped, and drives are pointed at the new place.
 
@@ -48,13 +48,13 @@ Installed copies from before the rename to EngineOS Emulator update into the new
 
 The emulator needs Linux (qemu-user, chroot and network namespaces), so on a Mac it runs in a small Ubuntu VM made with [Lima](https://lima-vm.io), the way it runs in WSL on Windows.
 
-**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator-mac.dmg) (macOS 13 or later, Apple Silicon and Intel), open the disk image and drag the app into Applications. It isn't notarized, so the first time right-click it and choose Open (on macOS 15, open it once, then System Settings > Privacy & Security > Open Anyway). Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). `mac/app/build.sh` builds it yourself.
+**The app:** [download EngineOS Emulator for Mac](https://github.com/jonathanrobichaud4/EngineOS-Emulator/releases/latest/download/EngineOSEmulator-mac.dmg) (macOS 13 or later, Apple Silicon and Intel), open the disk image and drag the app into Applications. It isn't notarized, so the first time right-click it and choose Open (on macOS 15, open it once, then System Settings > Privacy & Security > Open Anyway). Click **Install** (it installs Lima with Homebrew and creates the VM), then drop the SC LIVE 4 firmware on the window. After that it has Start, Stop, Reboot, Open deck and EngineX console buttons, takes dropped EngineX bundles, mods and music folders, shows what it's doing, and has the Windows app's options under Settings (Cmd+,). `apps/mac/app/build.sh` builds it yourself.
 
-**From Terminal**, `mac/engineos-emu` does the same:
+**From Terminal**, `apps/mac/engineos-emu` does the same (`mac/engineos-emu` still works too):
 
 ```sh
 git clone https://github.com/jonathanrobichaud4/EngineOS-Emulator engineos-emulator
-cd engineos-emulator/mac
+cd engineos-emulator/apps/mac
 ./engineos-emu install                                  # installs Lima (Homebrew) and creates the VM
 ./engineos-emu setup ~/Downloads/<SC LIVE 4 firmware>   # .img, Windows .exe or Mac .zip updater
 ./engineos-emu start                                    # opens http://localhost:8090
@@ -63,7 +63,7 @@ cd engineos-emulator/mac
 - After that, double-click **Start EngineOS Emulator.command** in Finder to start it (the first time, right-click > Open).
 - `stop`, `restart`, `status`, `log`, `open`, `console` (the EngineX console at http://localhost:8080), `update`, `vm-stop` (stops the VM to free its memory) and `uninstall`. Anything else goes to `emu.sh` in the VM, so `./engineos-emu graphics software`, `./engineos-emu mod-install ~/Downloads/mod.tar.gz` and so on work as on Linux.
 - Your home folder is visible in the VM read-only, so firmware and mod files can be anywhere in it. **Drives:** Engine writes its library onto a drive, so put folders you plug in as drives in `~/EngineOSEmulator` (writable from the VM): `./engineos-emu drive add ~/EngineOSEmulator/Music`.
-- It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`mac/lima.yaml` sets these).
+- It needs [Homebrew](https://brew.sh) for installing Lima, macOS 13 or later, and about 6 GB of memory and 40 GB of disk for the VM (`apps/mac/lima.yaml` sets these).
 - On Apple Silicon the VM is ARM64 Linux. Apple's chips can't run Engine's 32-bit ARM code directly, so it still goes through qemu-arm, as on a PC.
 
 Not yet tried on a real Mac: the Linux side is the same as on WSL, but the Lima VM and the launcher have only been checked with dry runs.
@@ -91,7 +91,7 @@ Updating: `sudo ./emu.sh stop`, then `git pull`, then `sudo ./emu.sh start`. You
 
 ## Graphics
 
-Engine draws its UI with OpenGL ES. The emulator gives it a Mesa virgl driver (`files/gl/`, built for the firmware's Mesa 24.0.7), so Engine's GL calls go over a socket to `virgl_test_server` on your PC, which draws them natively with Mesa (on the CPU with llvmpipe, or your GPU where WSL exposes one). The idea comes from [QEngine](https://github.com/Peyton-C/QEngine), which does the same through a QEMU VM's virtual GPU; here it runs over virgl's vtest socket, so the deck keeps running under qemu-user with its audio and controls.
+Engine draws its UI with OpenGL ES. The emulator gives it a Mesa virgl driver (`assets/gl/`, built for the firmware's Mesa 24.0.7), so Engine's GL calls go over a socket to `virgl_test_server` on your PC, which draws them natively with Mesa (on the CPU with llvmpipe, or your GPU where WSL exposes one). The idea comes from [QEngine](https://github.com/Peyton-C/QEngine), which does the same through a QEMU VM's virtual GPU; here it runs over virgl's vtest socket, so the deck keeps running under qemu-user with its audio and controls.
 
 If the screen looks wrong on your PC, switch to software rendering: tick "Software rendering" in the Windows app's More... menu, or run `./emu.sh graphics software` (`auto` to go back), then restart the deck. Software rendering draws everything except shader effects; the emulator then draws its own waveforms from the audio (no beat grid or markers) and plain versions of a few faded and coloured elements.
 
@@ -129,7 +129,7 @@ Managing decks:
 sudo ./emu.sh profile new stock            # an empty deck (then set it up as above)
 sudo ./emu.sh profile rename stock plain   # the deck has to be stopped
 sudo ./emu.sh profile delete plain         # deletes its rootfs and state; drive folders aren't touched
-sudo ./emu.sh profile model plain JC11S    # which deck it is: JP21 SC LIVE 4, JC11S Prime 4+, JC11 Prime 4
+sudo ./emu.sh profile model plain JC11S    # which deck it is (./emu.sh models lists them)
 ./emu.sh profiles                          # name, set up, EngineX version, model, running
 ```
 
@@ -137,13 +137,13 @@ The Mac and Windows apps do the same from their **Decks** window (Cmd+K on a Mac
 
 ### Models
 
-| Model | Firmware to set it up with | Panel |
+| Model | Firmware to set it up with | Its files |
 | --- | --- | --- |
-| SC LIVE 4 (JP21) | SC LIVE 4 | `files/panel.json` |
-| Prime 4+ (JC11S) | SC LIVE 4 (its Engine also runs as a Prime 4+) | `files/panel-JC11S.json` |
-| Prime 4 (JC11) | Prime 4 | `files/panel-JC11.json` |
+| SC LIVE 4 (JP21) | SC LIVE 4 | `models/JP21/` |
+| Prime 4+ (JC11S) | SC LIVE 4 (its Engine also runs as a Prime 4+) | `models/JC11S/` |
+| Prime 4 (JC11) | Prime 4 | `models/JC11/` |
 
-Engine only runs as a deck its firmware was built for; the wrong pair stops with a message saying so. On the Prime 4 and 4+ Engine mixes the four decks itself; the page's output menu has Main, Booth, Phones (the headphone cue) and Zone, and the MASTER and PHONES knobs set how loud the browser plays them, as they're the unit's own analog controls. `tools/make_panel_p4.py` builds both panels from Denon's user guide drawing and Engine's mapping file.
+Engine only runs as a deck its firmware was built for; the wrong pair stops with a message saying so. On the Prime 4 and 4+ Engine mixes the four decks itself; the page's output menu has Main, Booth, Phones (the headphone cue) and Zone, and the MASTER and PHONES knobs set how loud the browser plays them, as they're the unit's own analog controls. `models/gen/make_panel_p4.py` builds both panels from Denon's user guide drawing and Engine's mapping file. Everything the emulator and the apps know about a model is in its `model.json`; [docs/models.md](docs/models.md) says what's in it and how to add a model.
 
 ### Drives
 
@@ -175,7 +175,7 @@ The Mac app has a **Drives** window for the same (the Drives button, or Shift-Cm
 | `sudo ./emu.sh reset-data` | Clears Engine's settings and library so first-run starts again |
 | `sudo EMU_NET=0 ./emu.sh start` | Runs with no network |
 | `sudo ./emu.sh mod-install MOD.tar.gz` | Uploads, enables and loads a mod (deck running) |
-| `sudo ./emu.sh info` / `profiles` / `identify FILE` | Machine-readable state, decks and file types (used by the Windows app) |
+| `./emu.sh info --json` / `profiles --json` / `models --json` / `identify FILE` | Machine-readable state, decks, models and file types (what the apps read; see [docs/cli.md](docs/cli.md)) |
 | `sudo ./emu.sh dump-qml DIR [FILTER]` | Writes Engine's built-in QML (and other resources) out as files, for reading or for building mods kept as patches |
 
 ## Testing mods
@@ -186,34 +186,46 @@ To test a different stock firmware, run `setup` again with the other `.img`. It 
 
 ## How it works
 
-- Firmware: QEngine's readers in `tools/qengine/` take the update image out of an updater `.exe` or `.zip` and extract the rootfs, checking its digest (`tools/az0x_extract.py` is the fallback); `debugfs` copies the ext4 image out to `rootfs/`. Telemetry hosts from QEngine's list are pointed at localhost, and Engine starts with `-skipFirmwareUpdate` so it doesn't try to flash the virtual controller.
+- Firmware: QEngine's readers in `engine/firmware/` take the update image out of an updater `.exe` or `.zip` and extract the rootfs, checking its digest (`az0x_extract.py` there is the fallback); `debugfs` copies the ext4 image out to `rootfs/`. Telemetry hosts from QEngine's list are pointed at localhost, and Engine starts with `-skipFirmwareUpdate` so it doesn't try to flash the virtual controller.
 - qemu-user runs the ARM binaries through binfmt_misc inside a chroot of that root file system.
-- `files/fakesys.tar.gz` is a fake `/sys` made from the SC LIVE 4 device tree (product code JP21, CPU info, a non-blank eFuse). Without it Engine decides it's on a factory board and drops into test mode. All identifiers in it are placeholders.
-- `shim/libemushim.so` is preloaded into Engine (source in `shim/`):
-  - `emushim.c` copies every frame into `/tmp/emu/fb` (in OpenGL mode it turns eglfs's window into a pbuffer on Mesa's surfaceless EGL and reads each frame back at the buffer swap), turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `files/qml/`, and reports crashes with the library and offset.
-  - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
-- Software rendering only: `files/qml/` replaces built-in QML that needs shaders (`ColoredImage`, which every icon goes through, and the faded scrolling text), and the waveforms come from `viewer.py` (class `Waves`) renders each loaded track to PNGs. The QML that shows them is in `files/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
-- Software rendering only: `tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
-- `edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
-- `viewer.py` serves the page (`files/panel.html`, drawn from `files/panel.json`), turns panel actions into the JP21 MIDI messages (`tools/make_panel.py` holds the map, taken from Engine's own JP21 assignment file), answers Engine's "report all controls" query like the hardware does, and streams the audio.
+- `assets/fakesys.tar.gz` is a fake `/sys` made from the SC LIVE 4 device tree (product code JP21, CPU info, a non-blank eFuse). Without it Engine decides it's on a factory board and drops into test mode. All identifiers in it are placeholders.
+- `engine/shim/libemushim.so` is preloaded into Engine (source in `engine/shim/`):
+  - `emushim.c` copies every frame into `/tmp/emu/fb` (in OpenGL mode it turns eglfs's window into a pbuffer on Mesa's surfaceless EGL and reads each frame back at the buffer swap), turns screen input into touch events, stubs the CPU affinity calls qemu can't do, swaps in replacement QML from `assets/qml/`, and reports crashes with the library and offset.
+  - `alsa_emu.c` stands in for ALSA. The sequencer has the deck's "Control Surface" client (16:0), which answers the MIDI identity request in the JP21 controller's format (with a placeholder serial) and passes MIDI between Engine and the panel through `/tmp/emu/midi-in` and `midi-out`. The sound cards copy the deck's (on the SC LIVE 4: Control Surface, JP21 codec with 8 out and 2 in at 44.1 kHz, UAC2 gadget; each model's cards and MIDI devices come from its `model.json`); playback is paced in real time and one output pair is copied to `/tmp/emu/audio` for the browser.
+- Software rendering only: `assets/qml/` replaces built-in QML that needs shaders (`ColoredImage`, which every icon goes through, and the faded scrolling text), and the waveforms come from the viewer (`viewer/waves.py`), which renders each loaded track to PNGs. The QML that shows them is in `assets/qml-inject/`: the shim inserts it into Engine's compiled-in `Waveform.qml` and `WaveformOverview.qml`, and `emu.sh` bind-mounts injected copies over EngineX's pack versions while the deck runs. Engine asks for a track by writing a request file (Engine is started with `QML_XHR_ALLOW_FILE_WRITE=1`), so it works without the deck's network.
+- Software rendering only: `engine/tools/gl_items.py` finds Engine's scene-graph items that build OpenGL framebuffers (the waveform views) from the binary's C++ type info, and the shim makes those draw nothing. It checks the original bytes first, so it never patches a different Engine build in the wrong place.
+- `engine/edisks_emu.py` stands in for the deck's `edisksd` drive service on the deck's D-Bus. Engine asks it for drives and to mount them, and it bind-mounts your folders at `/media/<label>`, as on the deck.
+- The viewer (`viewer/`) serves the page (`viewer/web/`, drawn from the model's `panel.json`), turns panel actions into the deck's MIDI messages (`models/gen` holds the maps, taken from Engine's own assignment files), answers Engine's "report all controls" query like the hardware does, decodes the decks' own displays, and streams the audio.
 - Networking: the deck runs in its own network namespace with an `eth0`, gets an address from the firmware's own `udhcpd` on the PC side, and runs its own `connmand` (set to leave your PC's clock alone). `/proc/interrupts` and `/proc/irq` are faked inside so Engine finds its control-surface serial port.
-- `files/systemctl` stands in for systemd so the console can restart Engine.
+- `assets/systemctl` stands in for systemd so the console can restart Engine.
 
-## Building the shim
+## Working on it
 
-`shim/libemushim.so` is prebuilt. To rebuild it after changing `emushim.c` or `alsa_emu.c`:
+The code is split by job; [docs/layout.md](docs/layout.md) is the map:
+
+| Folder | What's in it |
+| --- | --- |
+| `engine/` | The Linux side: `emu.sh` (the command line) and `lib/` (setup, mounts, network, drives, decks, running), the shim, the firmware readers |
+| `viewer/` | The deck page: a Python package (`python3 -m viewer`) and the page itself in `viewer/web/` |
+| `models/` | One folder per deck model: `model.json` and the panel, and the generators in `models/gen/` |
+| `assets/` | Files that go into the deck: the fake `/sys`, QML stand-ins, the virgl Mesa driver |
+| `apps/` | The Mac app and launcher, and the Windows app |
+| `tests/` | `sudo tests/run.sh` runs every check that doesn't need a firmware file (CI runs it too) |
+| `docs/` | How it fits together, the models, the command line the apps use, the display protocol, releasing |
+
+`engine/shim/libemushim.so` is prebuilt. To rebuild it after changing `emushim.c`, `alsa_emu.c` or a model:
 
 ```sh
 sudo apt install gcc-arm-linux-gnueabihf libasound2-dev
-make -C shim
+make -C engine/shim
 ```
 
-The panel layout and MIDI map live in `tools/make_panel.py`; run it to regenerate `files/panel.json`.
+The panels are made by `models/gen/make_panel_jp21.py` and `models/gen/make_panel_p4.py`; run them after changing a layout or a MIDI map. The tests fail when the shim or a panel is older than what it's made from.
 
-`files/gl/swrast_dri.so` is prebuilt too (Mesa, MIT licensed). `sudo tools/build_mesa_virgl.sh [VERSION]` rebuilds it on Ubuntu 24.04, for another firmware's Mesa version if needed.
+`assets/gl/swrast_dri.so` is prebuilt too (Mesa, MIT licensed). `sudo tools/build_mesa_virgl.sh [VERSION]` rebuilds it on Ubuntu 24.04, for another firmware's Mesa version if needed.
 
 ## Notes
 
-Thanks to [QEngine](https://github.com/Peyton-C/QEngine) (MIT) for the virgl approach, the firmware readers in `tools/qengine/` and the telemetry list.
+Thanks to [QEngine](https://github.com/Peyton-C/QEngine) (MIT) for the virgl approach, the firmware readers in `engine/firmware/` and the telemetry list.
 
 No Denon firmware, Engine code or anything from a real deck is in this repository: you supply the firmware, and the identifiers the emulator presents (serial numbers, volume IDs) are placeholders. Mods for EngineX are in [enginex-mods](https://github.com/jonathanrobichaud4/enginex-mods).

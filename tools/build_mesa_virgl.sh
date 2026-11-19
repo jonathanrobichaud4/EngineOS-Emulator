@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds files/gl/swrast_dri.so: Mesa's DRI megadriver for 32-bit ARM with the virgl and
+# Builds assets/gl/swrast_dri.so: Mesa's DRI megadriver for 32-bit ARM with the virgl and
 # swrast gallium drivers, which is what lets Engine render with OpenGL through virgl (see
 # gl_ready in emu.sh). Mesa only offers virpipe, virgl over the vtest socket, through its
 # software-rasterizer loader, so it goes in under the swrast name in its own directory.
@@ -68,7 +68,7 @@ meson setup build --cross-file ../cross.txt -Dbuildtype=release -Dprefix=/usr -D
     -Dvideo-codecs= -Dgallium-vdpau=disabled -Dgallium-va=disabled -Dlmsensors=disabled \
     -Dbuild-tests=false -Dvalgrind=disabled -Dlibunwind=disabled -Dshared-glapi=enabled
 ninja -C build
-mkdir -p "$HERE/files/gl"
-arm-linux-gnueabihf-strip -o "$HERE/files/gl/swrast_dri.so" build/src/gallium/targets/dri/libgallium_dri.so
-echo "$VER" > "$HERE/files/gl/MESA_VERSION"
-echo "built files/gl/swrast_dri.so for Mesa $VER"
+mkdir -p "$HERE/assets/gl"
+arm-linux-gnueabihf-strip -o "$HERE/assets/gl/swrast_dri.so" build/src/gallium/targets/dri/libgallium_dri.so
+echo "$VER" > "$HERE/assets/gl/MESA_VERSION"
+echo "built assets/gl/swrast_dri.so for Mesa $VER"

@@ -1,0 +1,19 @@
+# Every check that doesn't need a firmware file (tests/run.sh): shell scripts parse, the generated
+# files (panels, the shim's model table) are current, the page's scripts parse, and the Python
+# tests (models, the display decoders, the control surface, emu.sh's deck and drive commands).
+# Runs on every push and pull request, and before a release.
+name: Tests
+on:
+  push:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # emu.sh's deck commands need root, as they do in WSL or the VM.
+      - run: sudo tests/run.sh

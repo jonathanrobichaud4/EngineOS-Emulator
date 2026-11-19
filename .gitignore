@@ -1,11 +1,14 @@
+# Decks and settings (they live in the checkout, next to the code; see docs/layout.md)
 rootfs/
 rootfs-*/
 state/
 state-*/
 drives.txt
+emu.conf
 *.img
+# Build output
 __pycache__/
 *.pyc
-emu.conf
-mac/app/build/
-windows/*.exe
+apps/mac/app/build/
+apps/windows/*.exe
+engine/shim/alsainc/

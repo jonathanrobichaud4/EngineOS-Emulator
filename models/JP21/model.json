@@ -1,0 +1,17 @@
+{
+  "code": "JP21",
+  "name": "SC LIVE 4",
+  "order": 1,
+  "firmware": {"container": "AZ0x", "name": "SC LIVE 4", "default": true},
+  "enginex": true,
+  "efuse": false,
+  "audio": {"card": "JP21", "pcm": "JP21 PCM inmusic,jp21-audio-codec-0", "out_channels": 8, "in_channels": 2,
+            "outputs": ["Main", "Booth", "Phones", "Out 7/8"]},
+  "midi": {
+    "family": 18,
+    "devices": [
+      {"name": "Control Surface", "client": 16}
+    ]
+  },
+  "notes": "One serial control surface; it answers Engine's identity request in the JP21 controller's own format."
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EngineOS Emulator</title>
+<link rel="stylesheet" href="/panel.css">
+</head><body>
+<header>
+  <b>EngineOS Emulator</b> <span id="model" style="color:var(--dim)"></span>
+  <button id="listen" title="Play Engine's audio output in this browser">Listen</button>
+  <select id="pair" title="Which output to hear"></select>
+  <button id="drivesBtn">Drives</button>
+  <button id="rebootBtn" title="Restart the whole emulated deck">Reboot</button>
+  <a href="__CONSOLE__" target="_blank">EngineX console</a>
+  <span id="st">connecting</span>
+</header>
+<div id="stage"><div id="panel"></div></div>
+
+<dialog id="drives">
+  <h3>Drives</h3>
+  <div class="hint">A folder on this PC shows up on the deck as a USB drive or the SD card. Use Linux paths:
+    your Windows <code>C:\Users\you\Music</code> is <code>/mnt/c/Users/you/Music</code>.
+    Engine writes its <i>Engine Library</i> folder into it, like on a real drive.</div>
+  <table id="dlist"></table>
+  <div class="row"><input id="dfolder" placeholder="/mnt/c/Users/you/Music" style="flex:1">
+    <select id="dkind"><option value="usb">USB drive</option><option value="sd">SD card</option></select>
+    <input id="dlabel" placeholder="Label" size="10"></div>
+  <div class="err" id="derr"></div>
+  <div class="row" style="justify-content:flex-end"><button id="dadd">Plug in</button><button id="dclose">Close</button></div>
+</dialog>
+
+<script src="/panel.js"></script>
+<script src="/displays.js"></script>
+<script src="/audio.js"></script>
+<script src="/drives.js"></script>
+<script src="/main.js"></script>
+</body></html>

@@ -4,7 +4,7 @@ name: Windows app
 on:
   push:
     branches: [main]
-    paths: ["windows/**", ".github/workflows/windows-app.yml"]
+    paths: ["apps/windows/**", "models/**", ".github/workflows/windows-app.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,22 +14,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Mono and NSIS
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel nsis >/dev/null
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mono-mcs mono-devel libmono-system-web-extensions4.0-cil nsis >/dev/null
       - name: Build
         shell: bash
         run: |
-          if ! BUILD_COMMIT=${{ github.sha }} windows/build.sh > build.log 2>&1; then
+          if ! BUILD_COMMIT=${{ github.sha }} apps/windows/build.sh > build.log 2>&1; then
             cat build.log
             grep -E '\(([0-9]+),([0-9]+)\): error ' build.log | head -30 |
-              sed -E 's/^([^(]+)\(([0-9]+),([0-9]+)\): error (.*)$/::error file=windows\/\1,line=\2,col=\3::\4/' || true
+              sed -E 's/^([^(]+)\(([0-9]+),([0-9]+)\): error (.*)$/::error file=apps\/windows\/\1,line=\2,col=\3::\4/' || true
             exit 1
           fi
           cat build.log
       - name: Installer
-        run: makensis -V2 -DVERSION="$(cat VERSION 2>/dev/null || echo 0.0.0)" windows/installer.nsi
+        run: makensis -V2 -DVERSION="$(cat VERSION 2>/dev/null || echo 0.0.0)" apps/windows/installer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: EngineOSEmulator-windows
           path: |
-            windows/EngineOSEmulator.exe
-            windows/EngineOSEmulator-Setup.exe
+            apps/windows/EngineOSEmulator.exe
+            apps/windows/EngineOSEmulator-Setup.exe

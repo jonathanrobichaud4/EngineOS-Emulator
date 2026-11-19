@@ -1,0 +1,65 @@
+/* The deck page's look. The panel's layout comes from models/CODE/panel.json. */
+:root{--bg:#0d0e10;--deck:#2a2d31;--deck2:#232528;--line:#3b3f45;--txt:#c9ccd1;--dim:#7d828a;--btn:#3a3d42;--btn2:#45494f}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:12px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+header{height:42px;display:flex;align-items:center;gap:10px;padding:0 12px;background:#16181b;border-bottom:1px solid #26292d}
+header b{font-size:14px;color:#e6e8eb;margin-right:6px}
+header button,header select{background:#2a2d32;color:#dfe2e6;border:1px solid #3a3e44;border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+header button:hover{background:#33373d}
+header button.on{background:#1f5f3a;border-color:#2f8a55}
+header a{color:#8bb8ff;text-decoration:none}
+#st{margin-left:auto;color:var(--dim);font-variant-numeric:tabular-nums}
+#stage{position:absolute;top:42px;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center}
+#panel{position:relative;width:1900px;height:1080px;transform-origin:0 0;background:linear-gradient(#303338,#26282c);border-radius:18px;box-shadow:0 10px 40px #000a,inset 0 1px 0 #ffffff14}
+.c{position:absolute;user-select:none;-webkit-user-select:none;touch-action:none}
+.lab{position:absolute;left:-20px;right:-20px;text-align:center;font-size:10px;letter-spacing:.04em;color:var(--dim);pointer-events:none;white-space:nowrap}
+.lab.below{top:calc(100% + 3px)}
+.text{color:var(--dim);font-size:10px;letter-spacing:.06em;text-align:center}
+.text.big{font-size:16px;color:#d8dbe0;font-weight:600}
+.btn{border-radius:5px;background:var(--btn);border:1px solid #1d1f22;box-shadow:inset 0 1px 0 #ffffff1a,0 2px 0 #0006;display:flex;align-items:center;justify-content:center;color:#d6d9de;font-size:10px;font-weight:600;letter-spacing:.03em;cursor:pointer}
+.btn.small{font-size:8.5px}
+.btn.big{font-size:14px}
+.btn.round{border-radius:50%}
+.btn.down{transform:translateY(1px);box-shadow:inset 0 1px 3px #0008}
+.pad{border-radius:6px;background:#1c1e21;border:1px solid #111;box-shadow:inset 0 0 0 1px #ffffff12;color:#ffffff60;font-size:11px;display:flex;align-items:flex-end;justify-content:flex-end;padding:4px 6px;cursor:pointer}
+.pad.down{transform:scale(.97)}
+.knob{border-radius:50%;background:radial-gradient(circle at 40% 35%,#55595f,#2c2f33 70%);box-shadow:0 2px 3px #0009,inset 0 1px 0 #ffffff22;cursor:ns-resize}
+.knob .ptr{position:absolute;left:50%;top:6%;width:3px;height:38%;margin-left:-1.5px;background:#e9ecef;border-radius:2px;transform-origin:50% 115%}
+.knob svg,.enc svg{position:absolute;inset:-6px;width:calc(100% + 12px);height:calc(100% + 12px);pointer-events:none}
+.enc{border-radius:50%;background:repeating-conic-gradient(#3d4146 0 6deg,#2e3135 6deg 12deg);box-shadow:0 2px 3px #0009;cursor:ns-resize}
+.enc .cap{position:absolute;inset:24%;border-radius:50%;background:radial-gradient(circle at 40% 35%,#5a5e64,#2f3236);box-shadow:inset 0 1px 0 #ffffff22;cursor:pointer}
+.enc .cap.down{background:#6b7077}
+.btn.locked{background:#f0f2f5;color:#111;box-shadow:0 0 10px #f0f2f5}
+.track{position:absolute;background:#121315;border-radius:3px;box-shadow:inset 0 1px 2px #000}
+.cap2{position:absolute;background:linear-gradient(#cfd2d6,#8d9298);border-radius:3px;box-shadow:0 2px 3px #000a;cursor:grab}
+.cap2::after{content:"";position:absolute;left:10%;right:10%;top:50%;height:2px;margin-top:-1px;background:#222}
+.xcap::after{left:50%;right:auto;top:10%;bottom:10%;width:2px;height:auto;margin:0 0 0 -1px}
+.jog{border-radius:50%;background:radial-gradient(circle,#2a2d31 0 46%,#1b1d20 47% 49%,repeating-conic-gradient(#3a3e44 0 2deg,#2c2f34 2deg 4deg) 50% 100%);box-shadow:0 6px 18px #000a,inset 0 0 0 2px #00000080;cursor:grab}
+.jog .top{position:absolute;inset:18%;border-radius:50%;background:radial-gradient(circle at 45% 40%,#3f444b,#1f2124);box-shadow:inset 0 0 0 2px #ffffff10}
+.jog .mark{position:absolute;left:50%;top:2%;width:4px;height:12%;margin-left:-2px;background:#e8eaed;border-radius:2px;transform-origin:50% 400%}
+.jog .info{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#9aa0a8;font-size:14px;font-weight:600;pointer-events:none}
+.jog.touched .top{box-shadow:inset 0 0 0 3px #4aa3ff}
+.oled{background:#000;border:1px solid #2a2d31;border-radius:3px;overflow:hidden}
+.oled canvas{width:100%;height:100%;display:block}
+.jog canvas.lcd{position:absolute;inset:18%;width:64%;height:64%;border-radius:50%;pointer-events:none}
+.sw{display:flex;border-radius:4px;overflow:hidden;border:1px solid #1d1f22;background:#1a1c1f}
+.sw div{flex:1;display:flex;align-items:center;justify-content:center;font-size:8.5px;color:#8a9097;cursor:pointer}
+.sw div.on{background:#5a5f66;color:#fff}
+.sel{border-radius:50%;background:radial-gradient(circle at 40% 35%,#55595f,#2c2f33 70%);cursor:pointer;box-shadow:0 2px 3px #0009}
+.sel .ptr{position:absolute;left:50%;top:8%;width:3px;height:40%;margin-left:-1.5px;background:#e9ecef;transform-origin:50% 105%}
+.sel .opt{position:absolute;font-size:9px;color:#8a9097;width:14px;margin:-6px 0 0 -7px;text-align:center}
+.sel .opt.on{color:#fff;font-weight:700}
+.vu{display:flex;flex-direction:column-reverse;gap:2px}
+.vu i{flex:1;border-radius:1px;background:#202225}
+.screen{background:#000;border-radius:4px;box-shadow:0 0 0 10px #17181a,0 0 0 11px #3a3d42}
+.screen canvas{width:100%;height:100%;display:block;cursor:pointer;border-radius:4px}
+.mixbg{background:var(--deck2);border-radius:10px;box-shadow:inset 0 0 0 1px #ffffff0d}
+dialog{background:#1b1d21;color:var(--txt);border:1px solid #33373d;border-radius:10px;min-width:520px;padding:18px}
+dialog h3{margin:0 0 10px;font-size:15px;color:#e6e8eb}
+dialog table{width:100%;border-collapse:collapse;margin:8px 0 14px}
+dialog td{padding:6px 4px;border-bottom:1px solid #2a2d32}
+dialog input,dialog select{background:#111316;color:#e6e8eb;border:1px solid #3a3e44;border-radius:6px;padding:6px 8px;font:inherit}
+dialog button{background:#2a2d32;color:#dfe2e6;border:1px solid #3a3e44;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+dialog .row{display:flex;gap:8px;align-items:center;margin:6px 0}
+dialog .err{color:#ff8a80;min-height:16px}
+dialog .hint{color:var(--dim);font-size:11px;line-height:1.5}
